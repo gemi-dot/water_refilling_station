@@ -1,0 +1,6 @@
+<!-- main/templates/main/transaction_detail.html -->
+<h2>Transaction Detail</h2>
+<p><strong>Customer:</strong> {{ transaction.customer }}</p>
+<p><strong>Amount:</strong> {{ transaction.amount }}</p>
+<p><strong>Date:</strong> {{ transaction.date }}</p>
+<a href="{% url 'transaction_list' %}">Back to list</a>

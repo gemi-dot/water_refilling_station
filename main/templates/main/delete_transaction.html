@@ -1,0 +1,9 @@
+<!-- main/templates/main/delete_transaction.html -->
+<h2>Confirm Delete</h2>
+<p>Are you sure you want to delete the transaction for <strong>{{ transaction.customer }}</strong> (₱{{ transaction.amount }})?</p>
+
+<form method="post">
+  {% csrf_token %}
+  <button type="submit">Yes, Delete</button>
+  <a href="{% url 'transaction_list' %}">Cancel</a>
+</form>
