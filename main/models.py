@@ -27,7 +27,7 @@ class InventoryItem(models.Model):
 
 class Transaction(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-    quantity = models.DecimalField(max_digits=10, decimal_places=2)  # or FloatField
+    quantity = models.DecimalField(max_digits=10, decimal_places=0)  # or FloatField
     price_per_gallon = models.DecimalField(max_digits=10, decimal_places=2)  # or FloatField
     created_at = models.DateTimeField(auto_now_add=True)
     payment_status = models.CharField(max_length=50)

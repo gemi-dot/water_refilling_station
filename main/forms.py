@@ -5,6 +5,9 @@ from .models import Customer
 from .models import Transaction
 
 
+from .models import InventoryItem
+
+
 class CustomerForm(forms.ModelForm):
     class Meta:
         model = Customer
@@ -20,3 +23,12 @@ class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
         fields = ['customer', 'quantity', 'price_per_gallon', 'payment_status', 'payment_method']
+
+
+
+
+
+class InventoryItemForm(forms.ModelForm):
+    class Meta:
+        model = InventoryItem
+        fields = ['name', 'unit', 'stock_in', 'stock_out']

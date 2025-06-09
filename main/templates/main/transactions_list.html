@@ -26,15 +26,8 @@
         <tr>
             <td>{{ transaction.customer.name }}</td>
             <td>{{ transaction.quantity }}</td>
-            <td>{{ transaction.price_per_gallon }}</td>
-            
-           
-
-            
-
+            <td>{{ transaction.price_per_gallon }}</td>            
             <td>{{ transaction.total_amount|floatformat:2 }}</td>
-
-
             <td>{{ transaction.created_at|date:"M d, Y H:i" }}</td>
             <td>{{ transaction.payment_status }}</td>
             <td>{{ transaction.payment_method }}</td>

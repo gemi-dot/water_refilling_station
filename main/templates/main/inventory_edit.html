@@ -1,0 +1,13 @@
+{% extends 'main/base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Edit Inventory Item</h2>
+    <form method="POST" class="mt-4">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn btn-primary">Update</button>
+        <a href="{% url 'inventory_list' %}" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
+{% endblock %}
