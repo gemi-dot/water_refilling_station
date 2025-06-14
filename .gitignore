@@ -1,17 +1,16 @@
-# Byte-compiled / optimized / DLL files
+# Python
+*.pyc
 __pycache__/
-*.py[cod]
 
-# Django database
+# SQLite database
 db.sqlite3
 
-# Environment
+# Virtual environments
 venv/
+
+# Django
+*.log
 .env
 
-# VS Code
-.vscode/
-
-# Django static/media
-staticfiles/
-media/
+# macOS
+.DS_Store
