@@ -28,6 +28,25 @@
               <li class="nav-item"><a href="{% url 'transaction_list' %}" class="nav-link">Transactions</a></li>
               <li class="nav-item"><a href="{% url 'inventory_list' %}" class="nav-link">Inventory</a></li>
 
+
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Reports
+                </a>
+                <ul class="dropdown-menu" aria-labelledby="reportsDropdown">
+                    <li><a class="dropdown-item" href="{% url 'daily_report' %}">Daily Transactions</a></li>
+                    <!-- Add more reports as needed -->
+                    <!-- <li><a class="dropdown-item" href="{% url 'monthly_report' %}">Monthly Report</a></li> -->
+
+                    <li><a class="dropdown-item" href="{% url 'monthly_report' %}">Monthly Report</a></li>
+
+
+                </ul>
+            </li>
+            
+
+
+
               <!-- Uncomment when Inventory views & urls are ready -->
               
               

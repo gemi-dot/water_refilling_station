@@ -1,0 +1,32 @@
+{% extends "main/base.html" %}
+{% block content %}
+<h2>Daily Transactions Report ({{ date }})</h2>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Customer</th>
+      <th>Item</th>
+      <th>Quantity</th>
+      <th>Price</th>
+      <th>Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in transactions %}
+    <tr>
+      <td>{{ t.customer.name }}</td>
+      <td>{{ t.inventory_item.name }}</td>
+      <td>{{ t.quantity }}</td>
+      <td>{{ t.price_per_gallon }}</td>
+      <td>{{ t.total_amount }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p><strong>Total Quantity:</strong> {{ total_qty }}</p>
+<p><strong>Total Revenue:</strong> ₱{{ total_revenue }}</p>
+
+<a href="{% url 'transaction_list' %}" class="btn btn-secondary">Back</a>
+{% endblock %}

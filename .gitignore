@@ -1,16 +1,17 @@
 # Python
-*.pyc
 __pycache__/
+*.py[cod]
 
-# SQLite database
-db.sqlite3
-
-# Virtual environments
+# Environment
 venv/
+.env
 
 # Django
+db.sqlite3
 *.log
-.env
+
+# VS Code
+.vscode/
 
 # macOS
 .DS_Store

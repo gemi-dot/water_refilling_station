@@ -1,0 +1,26 @@
+{% extends 'main/base.html' %}
+
+{% block content %}
+<h2>Monthly Report</h2>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Month</th>
+            <th>Total Sales (₱)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in monthly_data %}
+            <tr>
+                <td>{{ row.month|date:"F Y" }}</td>
+                <td>{{ row.total|floatformat:2 }}</td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="2">No data available.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

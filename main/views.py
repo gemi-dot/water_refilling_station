@@ -7,9 +7,18 @@ from .forms import CustomerForm
 from .models import Transaction
 from .forms import TransactionForm
 
-
 from .models import InventoryItem
 from .forms import InventoryItemForm  # You'll create this next
+
+from django.utils import timezone
+
+
+from django.db.models import Sum, F, DecimalField, ExpressionWrapper
+
+
+from django.db.models.functions import TruncMonth
+
+
 
 
 
@@ -189,9 +198,6 @@ def inventory_edit(request, pk):
         form = InventoryItemForm(instance=item)
     return render(request, 'main/inventory_edit.html', {'form': form})
 
-
-
-
 # Delete Inventory Item
 def inventory_delete(request, pk):
     item = get_object_or_404(InventoryItem, pk=pk)
@@ -200,3 +206,40 @@ def inventory_delete(request, pk):
         return redirect('inventory_list')
     return render(request, 'main/inventory_confirm_delete.html', {'item': item})
 
+############
+#june14--
+
+def daily_report(request):
+    today = timezone.now().date()
+    transactions = Transaction.objects.filter(created_at__date=today)
+
+    total_qty = transactions.aggregate(Sum('quantity'))['quantity__sum'] or 0
+    total_revenue = sum([t.total_amount for t in transactions])
+
+    return render(request, 'main/daily_report.html', {
+        'transactions': transactions,
+        'total_qty': total_qty,
+        'total_revenue': total_revenue,
+        'date': today
+    })
+
+##########
+
+def monthly_report(request):
+    monthly_data = (
+        Transaction.objects
+        .annotate(
+            month=TruncMonth('created_at'),
+            amount=ExpressionWrapper(F('quantity') * F('price_per_gallon'), output_field=DecimalField())
+        )
+        .values('month')
+        .annotate(total=Sum('amount'))
+        .order_by('month')
+    )
+
+    return render(request, 'main/monthly_report.html', {'monthly_data': monthly_data})
+
+
+
+
+######
