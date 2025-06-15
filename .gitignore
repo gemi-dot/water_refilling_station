@@ -1,17 +1,11 @@
-# Python
-__pycache__/
-*.py[cod]
-
-# Environment
 venv/
-.env
-
-# Django
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
 db.sqlite3
 *.log
-
-# VS Code
-.vscode/
-
-# macOS
-.DS_Store
+.env
+*.DS_Store
+/static/
+media/

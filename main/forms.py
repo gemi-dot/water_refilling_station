@@ -26,3 +26,9 @@ class InventoryItemForm(forms.ModelForm):
     class Meta:
         model = InventoryItem
         fields = ['name', 'unit', 'stock_in', 'stock_out']
+
+
+
+class RestockForm(forms.Form):
+    quantity = forms.IntegerField(min_value=1, label="Quantity to Add")
+    note = forms.CharField(widget=forms.Textarea, required=False, label="Note (optional)")

@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
+
 class Customer(models.Model):
     name = models.CharField(max_length=100)
     address = models.TextField()
@@ -22,9 +23,6 @@ class InventoryItem(models.Model):
     def __str__(self):
         return self.name
 
-
-# models.py
-
 class Transaction(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
 
@@ -41,6 +39,13 @@ class Transaction(models.Model):
     def total_amount(self):
         return self.quantity * self.price_per_gallon
 
+####################################
 
+class StockLog(models.Model):
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE)
+    change = models.IntegerField()  # positive for stock in, negative for manual out
+    date = models.DateTimeField(auto_now_add=True)
+    note = models.TextField(blank=True, null=True)
 
-
+    def __str__(self):
+        return f"{self.inventory_item.name} | Change: {self.change} | {self.date.strftime('%Y-%m-%d')}"

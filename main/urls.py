@@ -18,17 +18,16 @@ urlpatterns = [
     path('inventory/', views.inventory_list, name='inventory_list'),
     path('inventory/add/', views.inventory_add, name='inventory_add'),
     #path('inventory/edit/<int:pk>/', views.inventory_edit, name='inventory_edit'),
-
     path('inventory/edit/<int:pk>/', views.inventory_edit, name='inventory_edit'),
-
-
     path('inventory/delete/<int:pk>/', views.inventory_delete, name='inventory_delete'),
 
-
     path('reports/daily/', views.daily_report, name='daily_report'),
-
-
     path('reports/monthly/', views.monthly_report, name='monthly_report'),
+
+    path('inventory/restock/<int:item_id>/', views.restock_item, name='restock_item'),
+
+    path('inventory/<int:item_id>/', views.inventory_item_detail, name='inventory_item_detail'),
+
 
 
 ]

@@ -9,17 +9,15 @@ from .forms import TransactionForm
 
 from .models import InventoryItem
 from .forms import InventoryItemForm  # You'll create this next
-
 from django.utils import timezone
-
-
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper
-
-
 from django.db.models.functions import TruncMonth
 
 
-
+from django.contrib import messages
+from django.shortcuts import redirect
+from .forms import RestockForm
+from .models import InventoryItem, StockLog
 
 
 def customer_list(request):
@@ -35,7 +33,6 @@ def customer_list(request):
     }
     return render(request, 'main/customer_list.html', context)
   
-
 
 def customer_add(request):
     if request.method == 'POST':
@@ -240,6 +237,49 @@ def monthly_report(request):
     return render(request, 'main/monthly_report.html', {'monthly_data': monthly_data})
 
 
-
-
 ######
+
+def restock_item(request, item_id):
+    item = get_object_or_404(InventoryItem, id=item_id)
+
+    if request.method == 'POST':
+        form = RestockForm(request.POST)
+        if form.is_valid():
+            quantity = form.cleaned_data['quantity']
+            note = form.cleaned_data.get('note', '')
+
+            item.stock_in += quantity
+            item.save()
+
+            StockLog.objects.create(
+                inventory_item=item,
+                change=quantity,
+                note=note
+            )
+
+            messages.success(request, f"{quantity} units added to {item.name}.")
+            return redirect('inventory_item_detail', item_id=item.id)
+    else:
+        form = RestockForm()
+
+    return render(request, 'main/restock_item.html', {'form': form, 'item': item})
+
+##################
+
+
+###########
+
+def inventory_item_detail(request, item_id):
+    item = get_object_or_404(InventoryItem, pk=item_id)
+    stock_logs = StockLog.objects.filter(inventory_item=item).order_by('-date')
+    transactions = Transaction.objects.filter(inventory_item=item).order_by('-created_at')
+
+    context = {
+        'item': item,
+        'stock_logs': stock_logs,
+        'transactions': transactions,
+    }
+    return render(request, 'main/inventory_item_detail.html', context)
+
+
+

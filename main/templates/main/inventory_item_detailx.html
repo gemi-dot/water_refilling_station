@@ -1,0 +1,21 @@
+{% extends 'main/base.html' %}
+{% block content %}
+  <h2>{{ item.name }} ({{ item.unit }})</h2>
+  <p><strong>Current Stock:</strong> {{ item.current_stock }}</p>
+  <p><strong>Total Stock In:</strong> {{ item.stock_in }}</p>
+  <p><strong>Total Stock Out:</strong> {{ item.stock_out }}</p>
+
+  <a href="{% url 'restock_item' item.id %}" class="btn btn-success">Restock</a>
+
+  <hr>
+  <h3>Restock History</h3>
+  {% if stock_logs %}
+    <ul>
+      {% for log in stock_logs %}
+        <li>{{ log.date|date:"Y-m-d H:i" }} — Added: {{ log.change }} | Note: {{ log.note }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No restocking history found.</p>
+  {% endif %}
+{% endblock %}

@@ -28,12 +28,19 @@
                     <td>{{ item.stock_in }}</td>
                     <td>{{ item.stock_out }}</td>
                     <td>{{ item.current_stock }}</td>
+
+                    <td><a href="{% url 'inventory_item_detail' item.id %}" class="btn btn-info btn-sm">Details</a></td>
+
+
                     <td>
                         <a href="{% url 'inventory_edit' item.pk %}" class="btn btn-sm btn-primary">Edit</a>
                         <a href="{% url 'inventory_delete' item.pk %}" class="btn btn-sm btn-danger"
                            onclick="return confirm('Are you sure you want to delete this item?');">
                            Delete
                         </a>
+                        <a href="{% url 'inventory_item_detail' item.id %}">View Details</a>
+
+ 
                     </td>
                 </tr>
             {% empty %}
