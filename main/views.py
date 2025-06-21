@@ -19,6 +19,10 @@ from django.shortcuts import redirect
 from .forms import RestockForm
 from .models import InventoryItem, StockLog
 
+from django.utils.dateparse import parse_date
+
+
+
 
 def customer_list(request):
     query = request.GET.get('q', '')
@@ -206,21 +210,37 @@ def inventory_delete(request, pk):
 ############
 #june14--
 
+##########
+from django.shortcuts import render
+from django.utils.dateparse import parse_date
+from .models import Transaction
+
 def daily_report(request):
-    today = timezone.now().date()
-    transactions = Transaction.objects.filter(created_at__date=today)
+    date = request.GET.get('date')  # Get the date from the query parameter
+    if date:
+        date = parse_date(date)  # Parse the date string into a date object
+        transactions = Transaction.objects.filter(created_at__date=date)  # Use created_at__date for filtering
+    else:
+        transactions = Transaction.objects.all()  # Default to all transactions
 
-    total_qty = transactions.aggregate(Sum('quantity'))['quantity__sum'] or 0
-    total_revenue = sum([t.total_amount for t in transactions])
+    total_qty = sum(t.quantity for t in transactions)
+    total_revenue = sum(t.total_amount for t in transactions)
 
-    return render(request, 'main/daily_report.html', {
+    context = {
         'transactions': transactions,
+        'date': date,
         'total_qty': total_qty,
         'total_revenue': total_revenue,
-        'date': today
-    })
+    }
+    return render(request, 'main/daily_report.html', context)
 
-##########
+
+
+
+
+
+
+#####
 
 def monthly_report(request):
     monthly_data = (
