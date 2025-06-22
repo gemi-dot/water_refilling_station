@@ -21,6 +21,8 @@ from .models import InventoryItem, StockLog
 
 from django.utils.dateparse import parse_date
 
+from django.core.paginator import Paginator
+
 
 
 
@@ -72,9 +74,14 @@ def customer_delete(request, pk):
 
 # ... (existing customer views unchanged)
 
-def transaction_list(request):
-    transactions = Transaction.objects.select_related('customer', 'inventory_item').all()
-    return render(request, 'main/transactions_list.html', {'transactions': transactions})
+
+def transactions_list(request):
+    transactions = Transaction.objects.all().order_by('-created_at')  # Order by latest transactions
+    paginator = Paginator(transactions, 10)  # Show 10 transactions per page
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    return render(request, 'main/transactions_list.html', {'transactions': page_obj})
 
 
 def add_transaction(request):
@@ -100,7 +107,7 @@ def add_transaction(request):
             transaction.save()  # Save last
 
 
-            return redirect('transaction_list')
+            return redirect('transactions_list')
     else:
         form = TransactionForm()
     return render(request, 'main/add_transactions.html', {'form': form})
@@ -160,8 +167,11 @@ def delete_transaction(request, pk):
 
 #########
 
+#def home(request):
+#    return render(request, 'main/home.html')  # create this template or use any simple response
+
 def home(request):
-    return render(request, 'main/home.html')  # create this template or use any simple response
+    return render(request, 'main/home.html', {'transactions_url': 'transactions_list'})
 
 
 
@@ -169,10 +179,18 @@ def home(request):
 #    items = InventoryItem.objects.all()
 #    return render(request, 'main/inventory_list.html', {'items': items})
 
-def inventory_list(request):
-    inventory_items = InventoryItem.objects.all()
-    return render(request, 'main/inventory_list.html', {'inventory_items': inventory_items})
+from django.contrib import messages
 
+def inventory_list(request):
+    # Fetch all inventory items
+    inventory_items = InventoryItem.objects.all()
+
+    # Check for low stock items
+    low_stock_items = InventoryItem.objects.filter(stock_in__lte=10)  # Threshold set to 10 units
+    for item in low_stock_items:
+        messages.warning(request, f"Low stock alert: {item.name} has only {item.stock_in} units left.")
+
+    return render(request, 'main/inventory_list.html', {'inventory_items': inventory_items})
 
 ##########
 
@@ -211,9 +229,6 @@ def inventory_delete(request, pk):
 #june14--
 
 ##########
-from django.shortcuts import render
-from django.utils.dateparse import parse_date
-from .models import Transaction
 
 def daily_report(request):
     date = request.GET.get('date')  # Get the date from the query parameter
@@ -233,8 +248,6 @@ def daily_report(request):
         'total_revenue': total_revenue,
     }
     return render(request, 'main/daily_report.html', context)
-
-
 
 
 

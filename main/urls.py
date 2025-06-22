@@ -8,7 +8,10 @@ urlpatterns = [
     path('customers/delete/<int:pk>/', views.customer_delete, name='customer_delete'),
 
     path('', views.home, name='home'),
-    path('transactions/', views.transaction_list, name='transaction_list'),  # <-- list view
+    #path('transactions/', views.transaction_list, name='transaction_list'),  # <-- list view
+
+    path('transactions/', views.transactions_list, name='transactions_list'),  # Correct function name
+
     path('transactions/add/', views.add_transaction, name='add_transaction'),
     path('transactions/edit/<int:pk>/', views.edit_transaction, name='edit_transaction'),
     path('transactions/<int:pk>/', views.transaction_detail, name='transaction_detail'),
