@@ -1,9 +1,80 @@
-<!-- main/templates/main/home.html -->
 {% extends 'main/base.html' %}
 
-{% block title %}Home - Water Refilling Station{% endblock %}
-
 {% block content %}
-<h1>Welcome to Water Refilling Station</h1>
-<p>SoftWorks @2025 .</p>
+<div class="container mt-5">
+    <div class="text-center mb-4">
+        <h1 class="display-4">Water Refilling Station</h1>
+        <p class="lead">Manage your customers, inventory, and transactions efficiently.</p>
+    </div>
+
+    <div class="row">
+        <!-- Customers Section -->
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Customers</h5>
+                </div>
+                <div class="card-body">
+                    <p>View, add, edit, or delete customer information.</p>
+                    <a href="{% url 'customer_list' %}" class="btn btn-primary btn-block">Manage Customers</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inventory Section -->
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Inventory</h5>
+                </div>
+                <div class="card-body">
+                    <p>Track stock levels, restock items, and manage inventory.</p>
+                    <a href="{% url 'inventory_list' %}" class="btn btn-success btn-block">Manage Inventory</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transactions Section -->
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Transactions</h5>
+                </div>
+                <div class="card-body">
+                    <p>Record daily transactions and view transaction history.</p>
+                    <a href="{% url 'transactions_list' %}" class="btn btn-info btn-block">Manage Transactions</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <!-- Reports Section -->
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-warning text-white">
+                    <h5 class="mb-0">Reports</h5>
+                </div>
+                <div class="card-body">
+                    <p>Generate daily and monthly reports for transactions.</p>
+                    <a href="{% url 'daily_report' %}" class="btn btn-warning btn-block">Daily Report</a>
+                    <a href="{% url 'monthly_report' %}" class="btn btn-warning btn-block mt-2">Monthly Report</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Restock Section -->
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Restock Inventory</h5>
+                </div>
+                <div class="card-body">
+                    <p>Restock inventory items and view stock logs.</p>
+                    <a href="{% url 'inventory_list' %}" class="btn btn-secondary btn-block">Restock Items</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
