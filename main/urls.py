@@ -27,6 +27,8 @@ urlpatterns = [
     path('reports/daily/', views.daily_report, name='daily_report'),
     path('reports/monthly/', views.monthly_report, name='monthly_report'),
 
+    path('reports/unpaid-deliveries/', views.unpaid_delivery_report, name='unpaid_delivery_report'),
+
     path('inventory/restock/<int:item_id>/', views.restock_item, name='restock_item'),
 
     path('inventory/<int:item_id>/', views.inventory_item_detail, name='inventory_item_detail'),

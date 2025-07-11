@@ -15,11 +15,27 @@ class CustomerForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
 
+
 class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
-   
-        fields = ['customer', 'inventory_item', 'quantity', 'price_per_gallon', 'payment_status', 'payment_method']
+        fields = [
+            'customer',
+            'inventory_item',
+            'quantity',
+            'price_per_gallon',
+            'delivery_type',
+            'payment_status',
+            'payment_method',
+            'collected_at_end_of_day',
+        ]
+        widgets = {
+            'delivery_type': forms.Select(attrs={'class': 'form-control'}),
+            'payment_status': forms.Select(attrs={'class': 'form-control'}),
+            'payment_method': forms.Select(attrs={'class': 'form-control'}),
+            'collected_at_end_of_day': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+
 
 
 class InventoryItemForm(forms.ModelForm):

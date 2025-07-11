@@ -14,6 +14,8 @@ from django.db.models import Sum, F, DecimalField, ExpressionWrapper
 from django.db.models.functions import TruncMonth
 
 
+
+
 from django.contrib import messages
 from django.shortcuts import redirect
 from .forms import RestockForm
@@ -83,7 +85,6 @@ def transactions_list(request):
 
     return render(request, 'main/transactions_list.html', {'transactions': page_obj})
 
-
 def add_transaction(request):
     if request.method == 'POST':
         form = TransactionForm(request.POST)
@@ -100,18 +101,15 @@ def add_transaction(request):
                 return render(request, 'main/add_transactions.html', {'form': form})
 
             # Save transaction and update inventory
-            #transaction.save()
             inventory_item.stock_out += quantity
             inventory_item.save()
 
             transaction.save()  # Save last
 
-
-            return redirect('transactions_list')
+            return redirect('transactions_list')  # Correct URL name
     else:
         form = TransactionForm()
     return render(request, 'main/add_transactions.html', {'form': form})
-
 
 def edit_transaction(request, pk):
     transaction = get_object_or_404(Transaction, pk=pk)
@@ -135,18 +133,17 @@ def edit_transaction(request, pk):
                 # Restore previous stock_out
                 original_item.stock_out += original_quantity
                 original_item.save()
-                return render(request, 'main/edit_transaction.html', {'form': form})
+                return render(request, 'main/edit_transaction.html', {'form': form})  # Correct template name
 
             # Save updated transaction and update new inventory
             updated_transaction.save()
             new_item.stock_out += new_quantity
             new_item.save()
 
-            return redirect('transaction_list')
+            return redirect('transactions_list')
     else:
         form = TransactionForm(instance=transaction)
-    return render(request, 'main/edit_transaction.html', {'form': form})
-
+    return render(request, 'main/edit_transaction.html', {'form': form})  # Correct template name
 
 def transaction_detail(request, pk):
     transaction = get_object_or_404(Transaction, pk=pk)
@@ -162,7 +159,7 @@ def delete_transaction(request, pk):
         inventory_item.save()
 
         transaction.delete()
-        return redirect('transaction_list')
+        return redirect('transactions_list')
     return render(request, 'main/delete_transaction.html', {'transaction': transaction})
 
 #########
@@ -230,14 +227,20 @@ def inventory_delete(request, pk):
 
 ##########
 
-def daily_report(request):
-    date = request.GET.get('date')  # Get the date from the query parameter
-    if date:
-        date = parse_date(date)  # Parse the date string into a date object
-        transactions = Transaction.objects.filter(created_at__date=date)  # Use created_at__date for filtering
-    else:
-        transactions = Transaction.objects.all()  # Default to all transactions
 
+
+def daily_report(request):
+    date = request.GET.get('date')  # Get the date filter from the request
+    delivery_type = request.GET.get('delivery_type')  # Get the delivery type filter from the request
+
+    # Filter transactions based on the date and delivery type
+    transactions = Transaction.objects.all()
+    if date:
+        transactions = transactions.filter(created_at__date=date)
+    if delivery_type:
+        transactions = transactions.filter(delivery_type=delivery_type)
+
+    # Calculate total quantity and revenue
     total_qty = sum(t.quantity for t in transactions)
     total_revenue = sum(t.total_amount for t in transactions)
 
@@ -248,8 +251,6 @@ def daily_report(request):
         'total_revenue': total_revenue,
     }
     return render(request, 'main/daily_report.html', context)
-
-
 
 
 
@@ -316,3 +317,14 @@ def inventory_item_detail(request, item_id):
 
 
 
+
+def unpaid_delivery_report(request):
+    unpaid_deliveries = Transaction.objects.filter(delivery_type='delivery', payment_status='unpaid').order_by('-created_at')
+
+    total_pending_amount = sum(t.total_amount for t in unpaid_deliveries)
+
+    context = {
+        'unpaid_deliveries': unpaid_deliveries,
+        'total_pending_amount': total_pending_amount,
+    }
+    return render(request, 'main/unpaid_delivery_report.html', context)

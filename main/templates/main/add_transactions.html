@@ -1,4 +1,5 @@
 {% load static %}
+{% load form_tags %}  {# Load the add_class filter defined in templatetags/form_tags.py #}
 <!DOCTYPE html>
 <html>
 <head>
@@ -14,9 +15,51 @@
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
+
                 <div class="mb-3">
-                    {{ form.as_p }}
+                    <label for="{{ form.customer.id_for_label }}" class="form-label">Customer</label>
+                    {{ form.customer|add_class:"form-control" }}
                 </div>
+
+                <div class="mb-3">
+                    <label for="{{ form.inventory_item.id_for_label }}" class="form-label">Inventory Item</label>
+                    {{ form.inventory_item|add_class:"form-control" }}
+                </div>
+
+                <div class="mb-3">
+                    <label for="{{ form.quantity.id_for_label }}" class="form-label">Quantity</label>
+                    {{ form.quantity|add_class:"form-control" }}
+                </div>
+
+                <div class="mb-3">
+                    <label for="{{ form.price_per_gallon.id_for_label }}" class="form-label">Price per Gallon</label>
+                    {{ form.price_per_gallon|add_class:"form-control" }}
+                </div>
+
+                <div class="mb-3">
+                    <label for="{{ form.payment_status.id_for_label }}" class="form-label">Payment Status</label>
+                    {{ form.payment_status|add_class:"form-control" }}
+                </div>
+
+                <div class="mb-3">
+                    <label for="{{ form.payment_method.id_for_label }}" class="form-label">Payment Method</label>
+                    {{ form.payment_method|add_class:"form-control" }}
+                </div>
+
+                <!-- ✅ New field: Delivery Type -->
+                <div class="mb-3">
+                    <label for="{{ form.delivery_type.id_for_label }}" class="form-label">Delivery Type</label>
+                    {{ form.delivery_type|add_class:"form-control" }}
+                </div>
+
+                <!-- ✅ New field: Collected at End of Day -->
+                <div class="form-check mb-3">
+                    {{ form.collected_at_end_of_day }}
+                    <label class="form-check-label" for="{{ form.collected_at_end_of_day.id_for_label }}">
+                        Payment Collected at End of Day
+                    </label>
+                </div>
+
                 <div class="d-flex justify-content-end">
                     <button type="submit" class="btn btn-success me-2">Save</button>
                     <a href="{% url 'transactions_list' %}" class="btn btn-secondary">Back</a>
@@ -25,6 +68,7 @@
         </div>
     </div>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

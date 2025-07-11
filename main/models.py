@@ -22,25 +22,42 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         return self.name
+    
 
 class Transaction(models.Model):
+    DELIVERY_CHOICES = [
+        ('walk-in', 'Walk-In'),
+        ('delivery', 'Delivery'),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ('paid', 'Paid'),
+        ('unpaid', 'Unpaid'),
+    ]
+
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('check', 'Check'),
+        ('online', 'Online'),
+    ]
+
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
-
-    inventory_item = models.ForeignKey('InventoryItem', on_delete=models.CASCADE, default=1)  # NEW
-
-    quantity = models.DecimalField(max_digits=10, decimal_places=0)  # or FloatField
-    price_per_gallon = models.DecimalField(max_digits=10, decimal_places=2)  # or FloatField
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField()
+    price_per_gallon = models.DecimalField(max_digits=10, decimal_places=2)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Default value added
     created_at = models.DateTimeField(auto_now_add=True)
-    payment_status = models.CharField(max_length=50)
-    payment_method = models.CharField(max_length=50)
-    # other fields...
+    delivery_type = models.CharField(max_length=10, choices=DELIVERY_CHOICES, default='walk-in')
+    payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='paid')
+    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHOD_CHOICES, default='cash')
+    collected_at_end_of_day = models.BooleanField(default=False)
 
-    @property
-    def total_amount(self):
-        return self.quantity * self.price_per_gallon
+    def save(self, *args, **kwargs):
+        # Automatically calculate total_amount before saving
+        self.total_amount = self.quantity * self.price_per_gallon
+        super(Transaction, self).save(*args, **kwargs)
 
-####################################
-
+        
 class StockLog(models.Model):
     inventory_item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE)
     change = models.IntegerField()  # positive for stock in, negative for manual out
