@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 
+from datetime import timedelta
+
 
 class Customer(models.Model):
     name = models.CharField(max_length=100)
@@ -66,3 +68,25 @@ class StockLog(models.Model):
 
     def __str__(self):
         return f"{self.inventory_item.name} | Change: {self.change} | {self.date.strftime('%Y-%m-%d')}"
+
+
+# Add to main/models.py
+
+
+class DemoSettings(models.Model):
+    demo_start_date = models.DateTimeField(default=timezone.now)
+    demo_duration_days = models.IntegerField(default=14)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name_plural = "Demo Settings"
+    
+    def is_expired(self):
+        expiry_date = self.demo_start_date + timedelta(days=self.demo_duration_days)
+        return timezone.now() > expiry_date
+    
+    def days_remaining(self):
+        expiry_date = self.demo_start_date + timedelta(days=self.demo_duration_days)
+        remaining = expiry_date - timezone.now()
+        return max(0, remaining.days)

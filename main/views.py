@@ -112,6 +112,7 @@ def add_transaction(request):
     return render(request, 'main/add_transactions.html', {'form': form})
 
 def edit_transaction(request, pk):
+    
     transaction = get_object_or_404(Transaction, pk=pk)
     original_quantity = int(transaction.quantity)
     original_item = transaction.inventory_item

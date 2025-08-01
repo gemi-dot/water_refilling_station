@@ -9,6 +9,12 @@
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+        {% load static %}
+        <div class="demo-counter" style="background: #f39c12; color: white; padding: 5px 10px; text-align: center;">
+
+            <small>Demo: {{ demo_days_remaining }} days remaining</small>
+        </div>
+
         <div class="container">
             <a class="navbar-brand" href="{% url 'home' %}">Water Station</a>
             <button

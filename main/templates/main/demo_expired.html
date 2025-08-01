@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Demo Expired</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .expired-message { color: #e74c3c; font-size: 24px; margin-bottom: 20px; }
+        .contact-info { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="expired-message">Demo Period Expired</h1>
+        <p>Your 14-day demo period expired on {{ expiry_date|date:"F d, Y at g:i A" }}.</p>
+        <div class="contact-info">
+            <h3>Ready to Continue?</h3>
+            <p>Contact us to purchase the full version:</p>
+            <p><strong>Email:</strong> gemirong@gmail.com</p>
+            <p><strong>Phone:</strong> 09753273342</p>
+        </div>
+    </div>
+</body>
+</html>
