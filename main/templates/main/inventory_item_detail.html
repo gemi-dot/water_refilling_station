@@ -39,7 +39,7 @@
     <td>{{ txn.customer.name }}</td>
     <td>{{ txn.quantity }}</td>
     <td>{{ txn.total_amount }}</td>
-    <td>{{ txn.created_at|date:"M d, Y H:i" }}</td>
+    <td>{{ txn.created_at|date:"M d, Y h:i A" }}</td>
   </tr>
   {% empty %}
   <tr><td colspan="4">No transactions recorded.</td></tr>

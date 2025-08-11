@@ -75,7 +75,7 @@ class StockLog(models.Model):
 
 class DemoSettings(models.Model):
     demo_start_date = models.DateTimeField(default=timezone.now)
-    demo_duration_days = models.IntegerField(default=14)
+    demo_duration_days = models.IntegerField(default=30)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     

@@ -38,6 +38,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'main',  # Add this line
+    
+
 ]
 
 MIDDLEWARE = [
@@ -108,11 +110,17 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Manila'
 
-USE_I18N = True
+#USE_I18N = True
 
 USE_TZ = True
+
+DATETIME_FORMAT = "M d, Y h:i A"
+USE_L10N = False
+
+
+
 
 
 # Static files (CSS, JavaScript, Images)

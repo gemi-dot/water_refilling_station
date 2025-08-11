@@ -13,9 +13,6 @@ from django.utils import timezone
 from django.db.models import Sum, F, DecimalField, ExpressionWrapper
 from django.db.models.functions import TruncMonth
 
-
-
-
 from django.contrib import messages
 from django.shortcuts import redirect
 from .forms import RestockForm
@@ -24,6 +21,34 @@ from .models import InventoryItem, StockLog
 from django.utils.dateparse import parse_date
 
 from django.core.paginator import Paginator
+
+from django.db.models import Sum, Count
+
+
+def dashboard(request):
+    # Calculate total revenue
+    total_revenue = Transaction.objects.aggregate(total=Sum('total_amount'))['total'] or 0
+
+    # Calculate total transactions
+    total_transactions = Transaction.objects.count()
+
+    # Calculate total customers
+    total_customers = Transaction.objects.values('customer').distinct().count()
+
+    # Calculate low stock items
+    low_stock_items = InventoryItem.objects.filter(stock_in__lte=10).count()
+
+    # Recent transactions
+    recent_transactions = Transaction.objects.order_by('-created_at')[:5]
+
+    context = {
+        'total_revenue': total_revenue,
+        'total_transactions': total_transactions,
+        'total_customers': total_customers,
+        'low_stock_items': low_stock_items,
+        'recent_transactions': recent_transactions,
+    }
+    return render(request, 'main/dashboard.html', context)
 
 
 
@@ -76,14 +101,35 @@ def customer_delete(request, pk):
 
 # ... (existing customer views unchanged)
 
+from django.core.paginator import Paginator
+from django.utils.dateparse import parse_date
+from .models import Transaction
 
 def transactions_list(request):
-    transactions = Transaction.objects.all().order_by('-created_at')  # Order by latest transactions
-    paginator = Paginator(transactions, 10)  # Show 10 transactions per page
+    transactions = Transaction.objects.all().order_by('-created_at')  # Latest first
+
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    # Apply filters based on provided dates
+    if start_date and end_date:
+        transactions = transactions.filter(created_at__date__range=[start_date, end_date])
+    elif start_date:
+        transactions = transactions.filter(created_at__date__gte=start_date)
+    elif end_date:
+        transactions = transactions.filter(created_at__date__lte=end_date)
+
+    paginator = Paginator(transactions, 10)  # Show 10 per page
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
-    return render(request, 'main/transactions_list.html', {'transactions': page_obj})
+    return render(request, 'main/transactions_list.html', {
+        'transactions': page_obj,
+        'start_date': start_date,
+        'end_date': end_date
+    })
+
+
 
 def add_transaction(request):
     if request.method == 'POST':

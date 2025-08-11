@@ -59,7 +59,7 @@
                     <td>{{ transaction.total_amount|floatformat:2 }}</td>
                     <td>{{ transaction.delivery_type|title }}</td>
                     <td>{{ transaction.payment_status|title }}</td>
-                    <td>{{ transaction.created_at|date:"M d, Y H:i" }}</td>
+                    <td>{{ transaction.created_at|date:"M d, Y h:i A" }}</td>
                 </tr>
             {% empty %}
                 <tr>
