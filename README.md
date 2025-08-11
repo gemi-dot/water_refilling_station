@@ -45,3 +45,4 @@ python manage.py migrate
 
 # Start development server
 python manage.py runserver
+# NewWaterRefillStation
