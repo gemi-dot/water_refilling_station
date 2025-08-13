@@ -6,7 +6,7 @@ def demo_context(request):
         if demo_settings:
             return {
                 'demo_days_remaining': demo_settings.days_remaining(),
-                'demo_expired': demo_settings.is_expired()
+                'demo_expired': demo_settings.is_expired  # ✅ property, no ()
             }
     except DemoSettings.DoesNotExist:
         pass
