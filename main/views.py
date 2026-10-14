@@ -26,7 +26,10 @@ from django.utils.dateparse import parse_date
 
 from django.core.paginator import Paginator
 
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, Exists, OuterRef
+from django.db.models.deletion import ProtectedError
+from .forms import InventoryMetadataForm
+from .inventory import LOW_STOCK_THRESHOLD, deletion_reason, inventory_staff_required, stock_movements, stock_status
 
 
 def dashboard(request):
@@ -45,7 +48,7 @@ def dashboard(request):
     )
     inventory_items = list(InventoryItem.objects.order_by('name', 'pk'))
     # Display-only threshold matches the existing inventory list's 10-unit alert.
-    low_stock_threshold = 10
+    low_stock_threshold = LOW_STOCK_THRESHOLD
     context = {
         **summary,
         'today': today,
@@ -202,18 +205,23 @@ def home(request):
 from django.contrib import messages
 
 def inventory_list(request):
-    # Fetch all inventory items
-    inventory_items = InventoryItem.objects.all()
-
-    # Check for low stock items
-    low_stock_items = InventoryItem.objects.annotate(remaining=F('stock_in') - F('stock_out')).filter(remaining__lte=10)  # Threshold set to 10 units
-    for item in low_stock_items:
-        messages.warning(request, f"Low stock alert: {item.name} has only {item.current_stock()} units left.")
-
-    return render(request, 'main/inventory_list.html', {'inventory_items': inventory_items})
+    inventory_items = list(InventoryItem.objects.annotate(
+        has_sales=Exists(Transaction.objects.filter(inventory_item_id=OuterRef('pk'))),
+        has_stock_logs=Exists(StockLog.objects.filter(inventory_item_id=OuterRef('pk'))),
+    ).order_by('name', 'pk'))
+    for item in inventory_items:
+        item.stock_status = stock_status(item)
+        if item.current_stock() <= LOW_STOCK_THRESHOLD:
+            messages.warning(request, f"Low stock alert: {item.name} has only {item.current_stock()} units left. Unit: {item.unit}.")
+    return render(request, 'main/inventory_list.html', {
+        'inventory_items': inventory_items,
+        'low_stock_threshold': LOW_STOCK_THRESHOLD,
+        'low_stock_items': sum(item.current_stock() <= LOW_STOCK_THRESHOLD for item in inventory_items),
+    })
 
 ##########
 
+@inventory_staff_required('add')
 def inventory_add(request):
     if request.method == 'POST':
         form = InventoryItemForm(request.POST)
@@ -226,25 +234,35 @@ def inventory_add(request):
 
 
 # Edit Inventory Item
+@inventory_staff_required('change')
 @db_transaction.atomic
 def inventory_edit(request, pk):
     item = get_object_or_404(InventoryItem.objects.select_for_update(), pk=pk)
     if request.method == 'POST':
-        form = InventoryItemForm(request.POST, instance=item)
+        form = InventoryMetadataForm(request.POST, instance=item)
         if form.is_valid():
             form.save()
             return redirect('inventory_list')
     else:
-        form = InventoryItemForm(instance=item)
+        form = InventoryMetadataForm(instance=item)
     return render(request, 'main/inventory_edit.html', {'form': form})
 
 # Delete Inventory Item
+@inventory_staff_required('delete')
+@db_transaction.atomic
 def inventory_delete(request, pk):
-    item = get_object_or_404(InventoryItem, pk=pk)
-    if request.method == 'POST':
-        item.delete()
-        return redirect('inventory_list')
-    return render(request, 'main/inventory_confirm_delete.html', {'item': item})
+    item = get_object_or_404(InventoryItem.objects.select_for_update(), pk=pk)
+    reason = deletion_reason(item)
+    if request.method == 'POST' and not reason:
+        try:
+            with db_transaction.atomic():
+                item.delete()
+        except ProtectedError as error:
+            reason = str(error.args[0])
+        else:
+            messages.success(request, 'Inventory item deleted.')
+            return redirect('inventory_list')
+    return render(request, 'main/inventory_confirm_delete.html', {'item': item, 'deletion_reason': reason})
 
 ############
 #june14--
@@ -330,6 +348,7 @@ def monthly_report(request):
 
 ######
 
+@inventory_staff_required('change')
 @db_transaction.atomic
 def restock_item(request, item_id):
     item = get_object_or_404(InventoryItem.objects.select_for_update(), id=item_id)
@@ -362,13 +381,16 @@ def restock_item(request, item_id):
 
 def inventory_item_detail(request, item_id):
     item = get_object_or_404(InventoryItem, pk=item_id)
-    stock_logs = StockLog.objects.filter(inventory_item=item).order_by('-date')
-    transactions = Transaction.objects.filter(inventory_item=item).order_by('-created_at')
+    stock_logs = StockLog.objects.filter(inventory_item=item).order_by('-date', '-pk')
+    transactions = Transaction.objects.filter(inventory_item=item).select_related('customer').order_by('-created_at', '-pk')
 
     context = {
         'item': item,
         'stock_logs': stock_logs,
         'transactions': transactions,
+        'movements': stock_movements(stock_logs, transactions),
+        'stock_status': stock_status(item),
+        'low_stock_threshold': LOW_STOCK_THRESHOLD,
     }
     return render(request, 'main/inventory_item_detail.html', context)
 

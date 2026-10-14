@@ -51,3 +51,32 @@ class InventoryItemForm(forms.ModelForm):
 class RestockForm(forms.Form):
     quantity = forms.IntegerField(min_value=1, label="Quantity to Add")
     note = forms.CharField(widget=forms.Textarea, required=False, label="Note (optional)")
+
+
+class InventoryMetadataForm(forms.ModelForm):
+    """Preserve cumulative counts; additions belong in the logged Restock flow."""
+    class Meta:
+        model = InventoryItem
+        fields = ['name', 'unit']
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control'}),
+            'unit': forms.TextInput(attrs={'class': 'form-control'}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.is_bound:
+            for field in ('stock_in', 'stock_out'):
+                if field not in self.data:
+                    continue
+                try:
+                    supplied = int(self.data[field])
+                except (ValueError, TypeError):
+                    raise forms.ValidationError('Stock counts must be valid nonnegative integers.')
+                if supplied != getattr(self.instance, field):
+                    if field == 'stock_out' and supplied < self.instance.stock_out and self.instance.transaction_set.exists():
+                        raise forms.ValidationError('Stock out cannot be less than the quantity in recorded sales. Cumulative counts cannot be edited here.')
+                    raise forms.ValidationError('Cumulative stock counts cannot be edited here. Use Restock for recorded stock additions.')
+        if 'unit' in cleaned and cleaned['unit'] != self.instance.unit and (self.instance.transaction_set.exists() or self.instance.stocklog_set.exists()):
+            self.add_error('unit', 'The unit cannot be changed while sales or stock movement history reference this item.')
+        return cleaned

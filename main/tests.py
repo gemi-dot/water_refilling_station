@@ -16,6 +16,13 @@ class InventoryTransactionTests(TestCase):
         self.item = InventoryItem.objects.create(name='Water', unit='gallons', stock_in=20)
         self.other = InventoryItem.objects.create(name='Bottled water', unit='pcs', stock_in=10)
 
+    def authorize_inventory(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        staff = get_user_model().objects.create_user(username='inventory-test-staff', is_staff=True)
+        staff.user_permissions.set(Permission.objects.filter(codename__in=['add_inventoryitem', 'change_inventoryitem', 'delete_inventoryitem']))
+        self.client.force_login(staff)
+
     def data(self, quantity=5, item=None, **changes):
         data = {
             'customer': self.customer.pk, 'inventory_item': (item or self.item).pk,
@@ -190,6 +197,7 @@ class InventoryTransactionTests(TestCase):
         self.assertContains(response, 'table table-bordered table-striped')
 
     def test_inventory_add_and_edit_reject_negative_balances(self):
+        self.authorize_inventory()
         for stock_in, stock_out in ((-1, 0), (10, -1), (5, 6)):
             with self.subTest(stock_in=stock_in, stock_out=stock_out):
                 data = {'name': 'Invalid', 'unit': 'pcs', 'stock_in': stock_in, 'stock_out': stock_out}
@@ -202,6 +210,7 @@ class InventoryTransactionTests(TestCase):
         self.assertEqual(InventoryItem.objects.count(), 2)
 
     def test_inventory_edit_cannot_erase_recorded_sales_stock(self):
+        self.authorize_inventory()
         self.sale()
         response = self.client.post(reverse('inventory_edit', args=[self.item.pk]), {
             'name': 'Water', 'unit': 'gallons', 'stock_in': 20, 'stock_out': 0,
@@ -210,6 +219,7 @@ class InventoryTransactionTests(TestCase):
         self.balances(5)
 
     def test_restock_adds_inventory_and_log(self):
+        self.authorize_inventory()
         self.sale()
         response = self.client.post(reverse('restock_item', args=[self.item.pk]), {'quantity': 4, 'note': 'Delivery'})
         self.assertEqual(response.status_code, 302)
@@ -220,6 +230,7 @@ class InventoryTransactionTests(TestCase):
         self.assertEqual(log.note, 'Delivery')
 
     def test_restock_failure_rolls_back_inventory(self):
+        self.authorize_inventory()
         with patch('main.views.StockLog.objects.create', side_effect=DatabaseError('log failed')):
             with self.assertRaises(DatabaseError):
                 self.client.post(reverse('restock_item', args=[self.item.pk]), {'quantity': 4})
@@ -228,6 +239,7 @@ class InventoryTransactionTests(TestCase):
         self.assertFalse(StockLog.objects.exists())
 
     def test_invalid_restock_does_not_change_inventory(self):
+        self.authorize_inventory()
         for quantity in (0, -1, 'invalid'):
             response = self.client.post(reverse('restock_item', args=[self.item.pk]), {'quantity': quantity})
             self.assertEqual(response.status_code, 200)
@@ -887,3 +899,308 @@ class DashboardV3Tests(TestCase):
                 context = dashboard(request)
                 rows = [(sale.customer.name, sale.inventory_item.name) for sale in context['recent_transactions']]
         self.assertEqual(len(rows), 3)
+
+
+class InventoryV3Tests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        self.staff = get_user_model().objects.create_user(username='inventory-staff', is_staff=True)
+        self.staff.user_permissions.set(Permission.objects.filter(codename__in=['add_inventoryitem', 'change_inventoryitem', 'delete_inventoryitem']))
+        self.customer = Customer.objects.create(name='History Customer', address='Fictional', contact_number='N/A')
+        self.item = InventoryItem.objects.create(name='History Water', unit='gallons', stock_in=100)
+        self.detail_url = reverse('inventory_item_detail', args=[self.item.pk])
+        self.edit_url = reverse('inventory_edit', args=[self.item.pk])
+        self.delete_url = reverse('inventory_delete', args=[self.item.pk])
+
+    def login(self):
+        self.client.force_login(self.staff)
+
+    def sale(self, quantity=5):
+        return Transaction.objects.create(customer=self.customer, inventory_item=self.item, quantity=quantity, price_per_gallon=Decimal('25.00'))
+
+    def test_history_combines_stock_logs_and_sales_newest_first(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        log = StockLog.objects.create(inventory_item=self.item, change=20, note='Recorded delivery')
+        sale = self.sale()
+        adjustment = StockLog.objects.create(inventory_item=self.item, change=-2, note='Existing adjustment record')
+        now = timezone.now()
+        StockLog.objects.filter(pk=log.pk).update(date=now - timedelta(days=2))
+        Transaction.objects.filter(pk=sale.pk).update(created_at=now - timedelta(days=1))
+        StockLog.objects.filter(pk=adjustment.pk).update(date=now)
+        response = self.client.get(self.detail_url)
+        rows = response.context['movements']
+        self.assertEqual([row['type'] for row in rows], ['Adjustment', 'Sale / Stock Out', 'Stock In'])
+        self.assertEqual([row['quantity'] for row in rows], [-2, -5, 20])
+        self.assertContains(response, 'Recorded delivery')
+        self.assertContains(response, 'Reconstructed from current sale')
+        self.assertContains(response, reverse('transaction_detail', args=[sale.pk]))
+        self.assertContains(response, 'Running balances cannot be reliably reconstructed')
+
+    def test_logged_restock_appears_exactly_once_without_a_second_deduction(self):
+        self.login()
+        response = self.client.post(reverse('restock_item', args=[self.item.pk]), {'quantity': 10, 'note': 'New receipt'})
+        self.assertEqual(response.status_code, 302)
+        sale = self.sale()
+        for _ in range(2):
+            response = self.client.get(self.detail_url)
+            self.assertEqual(len(response.context['movements']), 2)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.stock_in, 110)
+        self.assertEqual(self.item.stock_out, 5)
+        self.assertEqual(StockLog.objects.count(), 1)
+        self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_viewing_history_changes_no_business_records(self):
+        log = StockLog.objects.create(inventory_item=self.item, change=100, note='Opening receipt')
+        self.sale()
+        before = {model: list(model.objects.order_by('pk').values()) for model in (InventoryItem, StockLog, Transaction, Customer)}
+        self.client.get(self.detail_url)
+        self.client.get(self.detail_url)
+        for model, values in before.items():
+            self.assertEqual(list(model.objects.order_by('pk').values()), values)
+
+    def test_history_empty_state_does_not_invent_opening_stock(self):
+        response = self.client.get(self.detail_url)
+        self.assertContains(response, 'No stock movement history is available')
+        self.assertEqual(response.context['movements'], [])
+        self.assertFalse(StockLog.objects.exists())
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.current_stock(), 100)
+
+    def test_history_queries_do_not_grow_with_sale_count(self):
+        from django.test import RequestFactory
+        from .views import inventory_item_detail
+        for _ in range(8):
+            self.sale(1)
+        request = RequestFactory().get(self.detail_url)
+        with patch('main.views.render', side_effect=lambda request, template, context: context):
+            with self.assertNumQueries(3):
+                context = inventory_item_detail(request, self.item.pk)
+        self.assertEqual(len(context['movements']), 8)
+
+    def test_history_uses_local_timezone(self):
+        from datetime import datetime, timezone as dt_timezone
+        sale = self.sale()
+        Transaction.objects.filter(pk=sale.pk).update(created_at=datetime(2026, 10, 13, 16, 0, tzinfo=dt_timezone.utc))
+        self.assertContains(self.client.get(self.detail_url), 'Oct 14, 2026 12:00 AM')
+
+    def test_threshold_statuses_and_dashboard_totals_match(self):
+        from .inventory import stock_status
+        for balance, label in ((0, 'Out of Stock'), (5, 'Low Stock'), (10, 'Low Stock'), (11, 'In Stock')):
+            item = InventoryItem.objects.create(name=f'Balance {balance}', unit='bottles', stock_in=balance)
+            self.assertEqual(stock_status(item), label)
+        response = self.client.get(reverse('inventory_list'))
+        self.assertEqual(response.context['low_stock_items'], 3)
+        self.assertEqual(self.client.get(reverse('dashboard')).context['low_stock_items'], 3)
+        for text in ('0 bottles', '5 bottles', '10 bottles', '11 bottles', 'bg-danger', 'bg-warning', 'bg-success', 'Details / History'):
+            self.assertContains(response, text)
+
+    def test_metadata_edits_preserve_stock_and_sales(self):
+        self.login()
+        sale = self.sale()
+        before_sale = list(Transaction.objects.values())
+        response = self.client.post(self.edit_url, {'name': 'Renamed Water', 'unit': 'gallons'})
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.name, 'Renamed Water')
+        self.assertEqual(self.item.stock_in, 100)
+        self.assertEqual(self.item.stock_out, 5)
+        self.assertEqual(list(Transaction.objects.values()), before_sale)
+        self.assertFalse(StockLog.objects.exists())
+
+    def test_direct_post_cannot_change_cumulative_counts_or_make_stock_negative(self):
+        self.login()
+        for change in ({'stock_in': -1}, {'stock_out': -1}, {'stock_out': 101}, {'stock_in': 200}, {'stock_in': 'bad'}):
+            with self.subTest(change=change):
+                response = self.client.post(self.edit_url, {'name': 'Should not change', 'unit': 'gallons', **change})
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.context['form'].errors)
+                self.item.refresh_from_db()
+                self.assertEqual(self.item.name, 'History Water')
+                self.assertEqual(self.item.stock_in, 100)
+                self.assertEqual(self.item.stock_out, 0)
+
+    def test_unit_edits_cannot_relabel_existing_sale_history(self):
+        self.login()
+        self.sale()
+        response = self.client.post(self.edit_url, {'name': self.item.name, 'unit': 'bottles'})
+        self.assertContains(response, 'The unit cannot be changed')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.unit, 'gallons')
+
+    def test_unit_edits_cannot_relabel_existing_stock_logs(self):
+        self.login()
+        StockLog.objects.create(inventory_item=self.item, change=100)
+        response = self.client.post(self.edit_url, {'name': self.item.name, 'unit': 'bottles'})
+        self.assertContains(response, 'The unit cannot be changed')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.unit, 'gallons')
+
+    def test_unit_can_change_on_unused_product(self):
+        self.login()
+        self.assertEqual(self.client.post(self.edit_url, {'name': self.item.name, 'unit': 'bottles'}).status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.unit, 'bottles')
+
+    def test_sale_referenced_item_cannot_be_deleted(self):
+        self.login()
+        sale = self.sale()
+        response = self.client.post(self.delete_url)
+        self.assertContains(response, 'referenced by existing sales transactions')
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+        self.assertTrue(Transaction.objects.filter(pk=sale.pk).exists())
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.stock_out, 5)
+
+    def test_item_with_stock_history_cannot_be_deleted(self):
+        self.login()
+        log = StockLog.objects.create(inventory_item=self.item, change=100)
+        response = self.client.post(self.delete_url)
+        self.assertContains(response, 'recorded stock movement history')
+        self.assertTrue(StockLog.objects.filter(pk=log.pk).exists())
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_orm_and_bulk_deletion_cannot_cascade_into_history(self):
+        from django.db import transaction
+        from django.db.models.deletion import ProtectedError
+        self.sale()
+        log = StockLog.objects.create(inventory_item=self.item, change=100)
+        for delete in (self.item.delete, lambda: InventoryItem.objects.filter(pk=self.item.pk).delete()):
+            with self.subTest(delete=delete), self.assertRaises(ProtectedError):
+                with transaction.atomic():
+                    delete()
+            self.item.refresh_from_db()
+            self.assertEqual(self.item.stock_out, 5)
+            self.assertEqual(Transaction.objects.count(), 1)
+            self.assertEqual(StockLog.objects.count(), 1)
+
+    def test_get_is_only_confirmation_and_cannot_delete(self):
+        self.login()
+        self.assertContains(self.client.get(self.delete_url), 'Yes, Delete')
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_authorized_post_deletes_unused_item(self):
+        self.login()
+        response = self.client.post(self.delete_url)
+        self.assertRedirects(response, reverse('inventory_list'))
+        self.assertFalse(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_post_requires_csrf_token(self):
+        from django.test import Client
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.staff)
+        self.assertEqual(client.post(self.delete_url).status_code, 403)
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_anonymous_write_requests_redirect_to_existing_login(self):
+        for url in (self.edit_url, self.delete_url, reverse('restock_item', args=[self.item.pk]), reverse('inventory_add')):
+            for method in ('get', 'post'):
+                with self.subTest(url=url, method=method):
+                    response = getattr(self.client, method)(url)
+                    self.assertEqual(response.status_code, 302)
+                    self.assertTrue(response.url.startswith(reverse('admin:login')))
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_non_staff_with_permissions_cannot_edit_or_delete(self):
+        self.staff.is_staff = False
+        self.staff.save(update_fields=['is_staff'])
+        self.login()
+        for url in (self.edit_url, self.delete_url):
+            self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_staff_without_permissions_cannot_edit_or_delete(self):
+        self.staff.user_permissions.clear()
+        self.login()
+        for url in (self.edit_url, self.delete_url):
+            self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_change_permission_does_not_grant_delete_permission(self):
+        from django.contrib.auth.models import Permission
+        self.staff.user_permissions.set(Permission.objects.filter(codename='change_inventoryitem'))
+        self.login()
+        self.assertEqual(self.client.get(self.edit_url).status_code, 200)
+        self.assertEqual(self.client.post(self.delete_url).status_code, 403)
+
+    def test_admin_protects_history_and_exposes_counts_as_read_only(self):
+        from django.contrib import admin
+        from django.contrib.auth import get_user_model
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=['is_superuser'])
+        self.login()
+        self.sale()
+        model_admin = admin.site._registry[InventoryItem]
+        from django.test import RequestFactory
+        request = RequestFactory().get('/')
+        request.user = self.staff
+        self.assertIn('stock_in', model_admin.get_readonly_fields(request, self.item))
+        self.assertIn('stock_out', model_admin.get_readonly_fields(request, self.item))
+        self.assertIn('unit', model_admin.get_readonly_fields(request, self.item))
+        self.assertTrue(model_admin.get_deleted_objects([self.item], request)[3])
+        response = self.client.get(reverse('admin:main_inventoryitem_change', args=[self.item.pk]))
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(reverse('admin:main_inventoryitem_delete', args=[self.item.pk]), {'post': 'yes'})
+        self.assertContains(response, 'referenced by existing sales transactions')
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_public_overview_and_history_remain_read_only_accessible(self):
+        self.assertEqual(self.client.get(reverse('inventory_list')).status_code, 200)
+        self.assertEqual(self.client.get(self.detail_url).status_code, 200)
+        self.assertNotContains(self.client.get(reverse('inventory_list')), 'Add Inventory Item')
+
+    def test_history_reflects_current_sale_after_edits_and_deletion_without_fake_logs(self):
+        sale = self.sale()
+        sale.quantity = 7
+        sale.save()
+        response = self.client.get(self.detail_url)
+        self.assertEqual(len(response.context['movements']), 1)
+        self.assertEqual(response.context['movements'][0]['quantity'], -7)
+        self.assertFalse(StockLog.objects.exists())
+        sale.delete()
+        self.assertEqual(self.client.get(self.detail_url).context['movements'], [])
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.stock_out, 0)
+
+    def test_orm_deletion_protects_stock_history_without_sales(self):
+        from django.db import transaction
+        from django.db.models.deletion import ProtectedError
+        log = StockLog.objects.create(inventory_item=self.item, change=100)
+        with self.assertRaises(ProtectedError), transaction.atomic():
+            self.item.delete()
+        self.assertTrue(StockLog.objects.filter(pk=log.pk).exists())
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_inactive_staff_cannot_modify_inventory(self):
+        self.staff.is_active = False
+        self.staff.save(update_fields=['is_active'])
+        self.login()
+        self.assertEqual(self.client.post(self.edit_url).status_code, 302)
+        self.assertEqual(self.client.post(self.delete_url).status_code, 302)
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_admin_bulk_delete_preserves_referenced_records(self):
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=['is_superuser'])
+        self.login()
+        self.sale()
+        response = self.client.post(reverse('admin:main_inventoryitem_changelist'), {
+            'action': 'delete_selected', '_selected_action': [str(self.item.pk)], 'post': 'yes',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(InventoryItem.objects.filter(pk=self.item.pk).exists())
+        self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_admin_direct_post_cannot_rewrite_stock_counts(self):
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=['is_superuser'])
+        self.login()
+        response = self.client.post(reverse('admin:main_inventoryitem_change', args=[self.item.pk]), {
+            'name': 'Changed name', 'unit': 'gallons', 'stock_in': 1000, 'stock_out': 0, '_save': 'Save',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.stock_in, 100)
+        self.assertEqual(self.item.name, 'History Water')
