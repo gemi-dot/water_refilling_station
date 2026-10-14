@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import F
+from django.db.models.deletion import ProtectedError
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -138,6 +139,17 @@ def adjust_stock_out(item_id, change):
 def restore_deleted_sale_stock(sender, instance, **kwargs):
     # Also covers admin bulk deletion and customer cascade deletion.
     adjust_stock_out(instance.inventory_item_id, -instance.quantity)
+
+
+@receiver(pre_delete, sender=InventoryItem)
+def protect_inventory_history(sender, instance, **kwargs):
+    # Covers view, direct ORM, admin, and bulk deletes without changing schema.
+    from .inventory import deletion_reason
+    with transaction.atomic():
+        item = InventoryItem.objects.select_for_update().get(pk=instance.pk)
+        reason = deletion_reason(item)
+        if reason:
+            raise ProtectedError(reason, {instance})
 
         
 class StockLog(models.Model):

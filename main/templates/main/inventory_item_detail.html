@@ -1,53 +1,31 @@
 {% extends 'main/base.html' %}
-
+{% load tz %}
+{% block title %}{{ item.name }} - Inventory History{% endblock %}
 {% block content %}
-<h2>Item Detail: {{ item.name }} ({{ item.unit }})</h2>
-<p><strong>Total Stock In:</strong> {{ item.stock_in }}</p>
-<p><strong>Total Stock Out:</strong> {{ item.stock_out }}</p>
-<p><strong>Current Stock:</strong> {{ item.current_stock }}</p>
-
-<hr>
-<h3>Recent Stock Logs</h3>
-<table>
-  <tr>
-    <th>Date</th>
-    <th>Quantity</th>
-    <th>Note</th>
-  </tr>
-  {% for log in stock_logs %}
-  <tr>
-    <td>{{ log.date|date:"M d, Y H:i" }}</td>
-    <td>{{ log.change }}</td>
-    <td>{{ log.note }}</td>
-  </tr>
-  {% empty %}
-  <tr><td colspan="3">No restocks recorded.</td></tr>
-  {% endfor %}
-</table>
-
-<hr>
-<h3>Recent Transactions</h3>
-<table>
-  <tr>
-    <th>Customer</th>
-    <th>Quantity</th>
-    <th>Amount</th>
-    <th>Date</th>
-  </tr>
-  {% for txn in transactions %}
-  <tr>
-    <td>{{ txn.customer.name }}</td>
-    <td>{{ txn.quantity }}</td>
-    <td>{{ txn.total_amount }}</td>
-    <td>{{ txn.created_at|date:"M d, Y h:i A" }}</td>
-  </tr>
-  {% empty %}
-  <tr><td colspan="4">No transactions recorded.</td></tr>
-  {% endfor %}
-</table>
-
-<p>
-  <a href="{% url 'restock_item' item.id %}" class="btn btn-primary">Restock</a>
-</p>
-
+<div class="my-4">
+    <header class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div><h1 class="h2 mb-1">{{ item.name }}</h1><p class="text-muted mb-0">Inventory details &middot; {{ item.unit }}</p></div>
+        <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary">Back to Inventory</a>
+    </header>
+    <div class="row g-3 mb-4">
+        <div class="col-sm-4"><div class="card h-100"><div class="card-body"><h2 class="h6 text-muted">Stock In</h2><p class="h4 mb-0">{{ item.stock_in }} {{ item.unit }}</p></div></div></div>
+        <div class="col-sm-4"><div class="card h-100"><div class="card-body"><h2 class="h6 text-muted">Stock Out</h2><p class="h4 mb-0">{{ item.stock_out }} {{ item.unit }}</p></div></div></div>
+        <div class="col-sm-4"><div class="card h-100"><div class="card-body"><h2 class="h6 text-muted">Current Stock</h2><p class="h4">{{ item.current_stock }} {{ item.unit }}</p><span class="badge {% if stock_status == 'Out of Stock' %}bg-danger{% elif stock_status == 'Low Stock' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ stock_status }}</span></div></div></div>
+    </div>
+    {% if user.is_staff and perms.main.change_inventoryitem %}<div class="d-flex gap-2 mb-4"><a href="{% url 'restock_item' item.pk %}" class="btn btn-primary">Restock</a><a href="{% url 'inventory_edit' item.pk %}" class="btn btn-outline-secondary">Edit Product Details</a></div>{% endif %}
+    <section aria-labelledby="history-heading">
+        <h2 id="history-heading" class="h4">Stock Movement History</h2>
+        <div class="alert alert-info">Stock logs are recorded movements. Sale rows are reconstructed from current sales at their original sale dates. Opening stock, direct past adjustments, sale edits and deleted sales may have no historical record. Running balances cannot be reliably reconstructed and are not shown.</div>
+        <p class="small text-muted">Newest first. Dates and times use the station's local timezone. Low stock: {{ low_stock_threshold }} units or fewer.</p>
+        <div class="table-responsive"><table class="table table-striped table-bordered align-middle">
+            <thead class="table-light"><tr><th scope="col">Date / Time</th><th scope="col">Inventory Item</th><th scope="col">Movement Type</th><th scope="col" class="text-end">Quantity</th><th scope="col">Reference / Source</th><th scope="col">Record Basis / Note</th></tr></thead>
+            <tbody>{% for movement in movements %}<tr>
+                <td>{{ movement.date|localtime|date:"M d, Y h:i A" }}</td><td>{{ item.name }}</td><td>{{ movement.type }}</td>
+                <td class="text-end text-nowrap">{% if movement.quantity > 0 %}+{% endif %}{{ movement.quantity }} {{ item.unit }}</td>
+                <td>{% if movement.transaction %}<a href="{% url 'transaction_detail' movement.transaction.pk %}">{{ movement.source }}</a>{% else %}{{ movement.source }}{% endif %}</td>
+                <td><span class="fw-semibold">{{ movement.record_kind }}</span>{% if movement.note %}<div class="small text-muted text-break">{{ movement.note }}</div>{% endif %}</td>
+            </tr>{% empty %}<tr><td colspan="6" class="text-center text-muted py-4">No stock movement history is available for this item. Current totals may include unlogged opening stock.</td></tr>{% endfor %}</tbody>
+        </table></div>
+    </section>
+</div>
 {% endblock %}

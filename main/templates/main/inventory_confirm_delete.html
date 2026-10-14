@@ -1,10 +1,10 @@
 {% extends 'main/base.html' %}
 {% block content %}
-<h2>Confirm Delete</h2>
-<p>Are you sure you want to delete <strong>{{ item.name }}</strong>?</p>
-<form method="POST">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-danger">Yes, Delete</button>
-    <a href="{% url 'inventory_list' %}" class="btn btn-secondary">Cancel</a>
-</form>
+<div class="card shadow-sm my-4"><div class="card-body">
+    <h1 class="h3">Confirm Inventory Deletion</h1>
+    {% if deletion_reason %}<div class="alert alert-warning" role="alert">{{ deletion_reason }}</div>
+    {% else %}<p>Delete <strong>{{ item.name }}</strong>? This item has no sales or recorded stock movement history. This action cannot be undone.</p>
+    <form method="post">{% csrf_token %}<button type="submit" class="btn btn-danger">Yes, Delete</button></form>{% endif %}
+    <a href="{% url 'inventory_list' %}" class="btn btn-outline-secondary mt-3">Back to Inventory</a>
+</div></div>
 {% endblock %}
