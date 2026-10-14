@@ -1,5 +1,7 @@
 
 # Create your views here.
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
 from django.shortcuts import render, redirect, get_object_or_404
@@ -24,7 +26,7 @@ from django.utils.dateparse import parse_date
 
 from django.core.paginator import Paginator
 
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 
 
 def dashboard(request):
@@ -249,25 +251,58 @@ def inventory_delete(request, pk):
 
 
 def daily_report(request):
-    date = request.GET.get('date')  # Get the date filter from the request
-    delivery_type = request.GET.get('delivery_type')  # Get the delivery type filter from the request
+    selected_date = timezone.localdate()
+    date_error = None
+    requested_date = request.GET.get('date')
+    if requested_date:
+        try:
+            parsed_date = parse_date(requested_date)
+        except ValueError:
+            parsed_date = None
+        if parsed_date is None or parsed_date.isoformat() != requested_date:
+            date_error = 'Please select a valid date in YYYY-MM-DD format. Showing today instead.'
+        else:
+            selected_date = parsed_date
 
-    # Filter transactions based on the date and delivery type
-    transactions = Transaction.objects.all()
-    if date:
-        transactions = transactions.filter(created_at__date=date)
+    delivery_type = request.GET.get('delivery_type', '')
+    if delivery_type not in dict(Transaction.DELIVERY_CHOICES):
+        delivery_type = ''
+
+    transactions = Transaction.objects.filter(created_at__date=selected_date)
     if delivery_type:
         transactions = transactions.filter(delivery_type=delivery_type)
 
-    # Calculate total quantity and revenue
-    total_qty = sum(t.quantity for t in transactions)
-    total_revenue = sum(t.total_amount for t in transactions)
-
+    zero = Decimal('0.00')
+    summary = transactions.aggregate(
+        transaction_count=Count('pk'),
+        total_qty=Sum('quantity', default=0),
+        total_revenue=Sum('total_amount', default=zero),
+        paid_sales=Sum('total_amount', filter=Q(payment_status='paid'), default=zero),
+        unpaid_sales=Sum('total_amount', filter=Q(payment_status='unpaid'), default=zero),
+        cash_sales=Sum('total_amount', filter=Q(payment_status='paid', payment_method='cash'), default=zero),
+        check_sales=Sum('total_amount', filter=Q(payment_status='paid', payment_method='check'), default=zero),
+        online_sales=Sum('total_amount', filter=Q(payment_status='paid', payment_method='online'), default=zero),
+    )
     context = {
-        'transactions': transactions,
-        'date': date,
-        'total_qty': total_qty,
-        'total_revenue': total_revenue,
+        **summary,
+        'transactions': transactions.select_related('customer', 'inventory_item').order_by('created_at', 'pk'),
+        'date': selected_date.isoformat(),
+        'report_date': selected_date,
+        'delivery_type': delivery_type,
+        'delivery_label': dict(Transaction.DELIVERY_CHOICES).get(delivery_type, 'All'),
+        'date_error': date_error,
+        'summary_cards': [
+            ('Total Transactions', summary['transaction_count'], False),
+            ('Gallons Sold', summary['total_qty'], False),
+            ('Total Sales', summary['total_revenue'], True),
+            ('Paid Sales', summary['paid_sales'], True),
+            ('Unpaid Sales', summary['unpaid_sales'], True),
+        ],
+        'payment_breakdown': [
+            ('Cash', summary['cash_sales']),
+            ('Check', summary['check_sales']),
+            ('Online', summary['online_sales']),
+        ],
     }
     return render(request, 'main/daily_report.html', context)
 
