@@ -80,3 +80,29 @@ class InventoryMetadataForm(forms.ModelForm):
         if 'unit' in cleaned and cleaned['unit'] != self.instance.unit and (self.instance.transaction_set.exists() or self.instance.stocklog_set.exists()):
             self.add_error('unit', 'The unit cannot be changed while sales or stock movement history reference this item.')
         return cleaned
+
+
+class SalesCustomerChoiceField(forms.ModelChoiceField):
+    def to_python(self, value):
+        if value not in self.empty_values:
+            text = str(value)
+            if not text.isascii() or not text.isdecimal() or len(text) > 19 or int(text) > 9223372036854775807:
+                raise forms.ValidationError(self.error_messages['invalid_choice'], code='invalid_choice', params={'value': value})
+        return super().to_python(value)
+
+
+class SalesFilterForm(forms.Form):
+    q = forms.CharField(required=False, max_length=200, label='Search', widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Customer, product, or sale ID'}))
+    start_date = forms.DateField(required=False, input_formats=['%Y-%m-%d'], label='From Date', widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
+    end_date = forms.DateField(required=False, input_formats=['%Y-%m-%d'], label='To Date', widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
+    customer = SalesCustomerChoiceField(queryset=Customer.objects.order_by('name', 'pk'), required=False, empty_label='All Customers', widget=forms.Select(attrs={'class': 'form-select'}))
+    payment_status = forms.ChoiceField(choices=[('', 'All Payment Statuses')] + Transaction.PAYMENT_STATUS_CHOICES, required=False, widget=forms.Select(attrs={'class': 'form-select'}))
+    delivery_type = forms.ChoiceField(choices=[('', 'All Delivery Types')] + Transaction.DELIVERY_CHOICES, required=False, widget=forms.Select(attrs={'class': 'form-select'}))
+
+    def clean(self):
+        cleaned = super().clean()
+        start = cleaned.get('start_date')
+        end = cleaned.get('end_date')
+        if start and end and start > end:
+            self.add_error('end_date', 'To Date must be on or after From Date.')
+        return cleaned

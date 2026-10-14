@@ -1204,3 +1204,233 @@ class InventoryV3Tests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.stock_in, 100)
         self.assertEqual(self.item.name, 'History Water')
+
+
+class SalesManagementV41Tests(TestCase):
+    def setUp(self):
+        from datetime import date
+        self.day = date(2026, 10, 14)
+        self.alpha = Customer.objects.create(name='Alpha Household', address='Private address', contact_number='Private phone')
+        self.beta = Customer.objects.create(name='Beta Office', address='Other private address', contact_number='Other private phone')
+        self.item = InventoryItem.objects.create(name='Purified Refill', unit='gallons', stock_in=100)
+        self.other = InventoryItem.objects.create(name='Mineral Refill', unit='gallons', stock_in=100)
+        self.paid = self.sale(self.alpha, self.item, 2, '25.50', 'paid', 'walk-in', hour=9)
+        self.unpaid = self.sale(self.alpha, self.item, 3, '30.25', 'unpaid', 'delivery', hour=10)
+        self.older = self.sale(self.beta, self.other, 1, '40.00', 'paid', 'delivery', day_offset=-1)
+        self.url = reverse('transactions_list')
+
+    def sale(self, customer, item, quantity, price, status, delivery, day_offset=0, hour=12):
+        from datetime import datetime, time, timedelta
+        from zoneinfo import ZoneInfo
+        sale = Transaction.objects.create(customer=customer, inventory_item=item, quantity=quantity, price_per_gallon=Decimal(price), payment_status=status, delivery_type=delivery)
+        timestamp = datetime.combine(self.day + timedelta(days=day_offset), time(hour), ZoneInfo('Asia/Manila'))
+        Transaction.objects.filter(pk=sale.pk).update(created_at=timestamp)
+        return sale
+
+    def ids(self, response):
+        return [sale.pk for sale in response.context['transactions']]
+
+    def test_public_sales_listing_loads_and_preserves_existing_links(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'main/transactions_list.html')
+        self.assertTemplateUsed(response, 'main/base.html')
+        for text in ('Sales Management', 'Apply Filters', 'Clear Filters', 'table-responsive', 'Filtered Transactions', 'Filtered Paid Sales', 'not money collected'):
+            self.assertContains(response, text)
+        for route in ('transaction_detail', 'edit_transaction', 'delete_transaction'):
+            self.assertContains(response, reverse(route, args=[self.paid.pk]))
+        self.assertNotContains(response, 'Private address')
+        self.assertNotContains(response, 'Private phone')
+
+    def test_customer_name_search_is_case_insensitive_and_trimmed(self):
+        response = self.client.get(self.url, {'q': '  aLPHa  '})
+        self.assertEqual(set(self.ids(response)), {self.paid.pk, self.unpaid.pk})
+        self.assertEqual(response.context['filter_form'].cleaned_data['q'], 'aLPHa')
+
+    def test_id_search_accepts_number_and_displayed_reference(self):
+        for value in (str(self.paid.pk), f'#{self.paid.pk}'):
+            with self.subTest(value=value):
+                self.assertEqual(self.ids(self.client.get(self.url, {'q': value})), [self.paid.pk])
+
+    def test_invalid_or_oversized_id_search_is_safe(self):
+        for value in ('#bad', '#-1', '9' * 100, '９９９', '123xyz'):
+            with self.subTest(value=value):
+                response = self.client.get(self.url, {'q': value})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context['transaction_count'], 0)
+
+    def test_product_search(self):
+        self.assertEqual(self.ids(self.client.get(self.url, {'q': 'mINeral'})), [self.older.pk])
+
+    def test_empty_search_returns_default_listing_without_duplicates(self):
+        for value in ('', '   '):
+            response = self.client.get(self.url, {'q': value})
+            self.assertEqual(response.context['transaction_count'], 3)
+        self.alpha.name = 'Purified Customer'
+        self.alpha.save()
+        self.assertEqual(self.client.get(self.url, {'q': 'Purified'}).context['transaction_count'], 2)
+
+    def test_from_date_only_is_inclusive(self):
+        response = self.client.get(self.url, {'start_date': '2026-10-14'})
+        self.assertEqual(set(self.ids(response)), {self.paid.pk, self.unpaid.pk})
+
+    def test_to_date_only_is_inclusive(self):
+        response = self.client.get(self.url, {'end_date': '2026-10-13'})
+        self.assertEqual(self.ids(response), [self.older.pk])
+
+    def test_date_range_is_inclusive_and_excludes_outside_dates(self):
+        self.sale(self.beta, self.other, 1, '1.00', 'paid', 'walk-in', day_offset=1)
+        response = self.client.get(self.url, {'start_date': '2026-10-13', 'end_date': '2026-10-14'})
+        self.assertEqual(response.context['transaction_count'], 3)
+        response = self.client.get(self.url, {'start_date': '2026-10-14', 'end_date': '2026-10-14'})
+        self.assertEqual(response.context['transaction_count'], 2)
+
+    def test_local_midnight_date_boundaries(self):
+        from datetime import datetime, timezone as dt_timezone
+        Transaction.objects.filter(pk=self.paid.pk).update(created_at=datetime(2026, 10, 13, 16, 0, tzinfo=dt_timezone.utc))
+        Transaction.objects.filter(pk=self.unpaid.pk).update(created_at=datetime(2026, 10, 14, 15, 59, 59, tzinfo=dt_timezone.utc))
+        Transaction.objects.filter(pk=self.older.pk).update(created_at=datetime(2026, 10, 14, 16, 0, tzinfo=dt_timezone.utc))
+        response = self.client.get(self.url, {'start_date': '2026-10-14', 'end_date': '2026-10-14'})
+        self.assertEqual(set(self.ids(response)), {self.paid.pk, self.unpaid.pk})
+
+    def test_invalid_dates_show_validation_errors_instead_of_widening_results(self):
+        for value in ('bad', '2026-02-30', '2026-13-01', '0000-01-01'):
+            for field in ('start_date', 'end_date'):
+                with self.subTest(field=field, value=value):
+                    response = self.client.get(self.url, {field: value})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertTrue(response.context['filter_form'].errors)
+                    self.assertEqual(response.context['transaction_count'], 0)
+                    self.assertContains(response, 'Please correct the filters')
+
+    def test_reversed_dates_show_clear_error(self):
+        response = self.client.get(self.url, {'start_date': '2026-10-15', 'end_date': '2026-10-14'})
+        self.assertContains(response, 'To Date must be on or after From Date.')
+        self.assertEqual(response.context['transaction_count'], 0)
+
+    def test_customer_filter_preserves_selection(self):
+        response = self.client.get(self.url, {'customer': self.beta.pk})
+        self.assertEqual(self.ids(response), [self.older.pk])
+        self.assertEqual(response.context['filter_form'].cleaned_data['customer'], self.beta)
+        self.assertContains(response, f'value="{self.beta.pk}" selected')
+
+    def test_invalid_or_deleted_customer_ids_are_safe(self):
+        spare = Customer.objects.create(name='Deleted filter customer', address='Fictional', contact_number='N/A')
+        removed_id = spare.pk
+        spare.delete()
+        for value in ('bad', '-1', str(removed_id), '9' * 100):
+            with self.subTest(value=value):
+                response = self.client.get(self.url, {'customer': value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn('customer', response.context['filter_form'].errors)
+                self.assertEqual(response.context['transaction_count'], 0)
+
+    def test_payment_status_filter(self):
+        response = self.client.get(self.url, {'payment_status': 'unpaid'})
+        self.assertEqual(self.ids(response), [self.unpaid.pk])
+        self.assertEqual(response.context['unpaid_sales'], Decimal('90.75'))
+        self.assertEqual(response.context['paid_sales'], Decimal('0.00'))
+
+    def test_delivery_type_filter(self):
+        response = self.client.get(self.url, {'delivery_type': 'delivery'})
+        self.assertEqual(set(self.ids(response)), {self.unpaid.pk, self.older.pk})
+
+    def test_invalid_choice_filters_are_rejected(self):
+        for field in ('payment_status', 'delivery_type'):
+            response = self.client.get(self.url, {field: 'unsupported'})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(field, response.context['filter_form'].errors)
+            self.assertEqual(response.context['transaction_count'], 0)
+
+    def test_combined_filters(self):
+        filters = {'q': 'Purified', 'start_date': '2026-10-14', 'end_date': '2026-10-14', 'customer': self.alpha.pk, 'payment_status': 'unpaid', 'delivery_type': 'delivery'}
+        response = self.client.get(self.url, filters)
+        self.assertEqual(self.ids(response), [self.unpaid.pk])
+        self.assertEqual(response.context['total_qty'], 3)
+        self.assertEqual(response.context['total_revenue'], Decimal('90.75'))
+
+    def test_summary_count_quantity_and_decimal_totals(self):
+        response = self.client.get(self.url)
+        context = response.context
+        self.assertEqual(context['transaction_count'], 3)
+        self.assertEqual(context['total_qty'], 6)
+        self.assertEqual(context['total_revenue'], Decimal('181.75'))
+        self.assertIsInstance(context['total_revenue'], Decimal)
+        self.assertEqual(context['paid_sales'], Decimal('91.00'))
+        self.assertEqual(context['unpaid_sales'], Decimal('90.75'))
+        self.assertEqual(context['paid_sales'] + context['unpaid_sales'], context['total_revenue'])
+        self.assertContains(response, '₱181.75')
+
+    def test_daily_report_totals_match_for_same_filters(self):
+        filters = {'start_date': '2026-10-14', 'end_date': '2026-10-14', 'delivery_type': 'delivery'}
+        response = self.client.get(self.url, filters)
+        report = self.client.get(reverse('daily_report'), {'date': '2026-10-14', 'delivery_type': 'delivery'})
+        for key in ('transaction_count', 'total_qty', 'total_revenue', 'paid_sales', 'unpaid_sales'):
+            self.assertEqual(response.context[key], report.context[key])
+
+    def test_empty_results_render_zero_totals(self):
+        response = self.client.get(self.url, {'q': 'No such customer or product'})
+        for key in ('transaction_count', 'total_qty', 'total_revenue', 'paid_sales', 'unpaid_sales'):
+            self.assertEqual(response.context[key], 0)
+        self.assertIsInstance(response.context['total_revenue'], Decimal)
+        self.assertContains(response, 'No transactions found.')
+        self.assertContains(response, '₱0.00')
+
+    def test_pagination_retains_filters_and_totals_cover_all_pages(self):
+        from urllib.parse import parse_qs
+        for _ in range(12):
+            self.sale(self.alpha, self.item, 1, '1.25', 'paid', 'walk-in', hour=15)
+        filters = {'q': 'Alpha', 'customer': str(self.alpha.pk), 'start_date': '2026-10-14', 'end_date': '2026-10-14', 'payment_status': 'paid', 'delivery_type': 'walk-in'}
+        first = self.client.get(self.url, filters)
+        second = self.client.get(self.url, {**filters, 'page': '2'})
+        self.assertEqual(len(first.context['transactions']), 10)
+        self.assertEqual(len(second.context['transactions']), 3)
+        for response in (first, second):
+            self.assertEqual(response.context['transaction_count'], 13)
+            self.assertEqual(response.context['total_qty'], 14)
+            self.assertEqual(response.context['total_revenue'], Decimal('66.00'))
+            self.assertEqual(parse_qs(response.context['filter_query']), {key: [value] for key, value in filters.items()})
+            self.assertContains(response, 'page=2' if response is first else 'page=1')
+        self.assertEqual(set(self.ids(first)) & set(self.ids(second)), set())
+        self.assertEqual(self.ids(first), sorted(self.ids(first), reverse=True))
+
+    def test_query_parameters_are_url_encoded(self):
+        from urllib.parse import parse_qs
+        query = 'Alpha & Office + #1'
+        response = self.client.get(self.url, {'q': query})
+        self.assertEqual(parse_qs(response.context['filter_query'])['q'], [query])
+
+    def test_invalid_page_numbers_are_safe(self):
+        for value in ('bad', '0', '-1', '9999999999999999999999999999999999'):
+            with self.subTest(page=value):
+                response = self.client.get(self.url, {'page': value})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context['transactions'].number, 1)
+                self.assertEqual(response.context['transaction_count'], 3)
+
+    def test_existing_access_controls_remain_unchanged(self):
+        from django.contrib.auth import get_user_model
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        user = get_user_model().objects.create_user(username='sales-viewer')
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.assertEqual(self.client.get(reverse('admin:index')).status_code, 302)
+        self.assertEqual(self.client.get(reverse('inventory_edit', args=[self.item.pk])).status_code, 403)
+
+    def test_get_requests_cause_no_sales_inventory_or_customer_mutation(self):
+        models = (Transaction, InventoryItem, Customer, StockLog)
+        before = {model: list(model.objects.order_by('pk').values()) for model in models}
+        for filters in ({}, {'q': 'Alpha'}, {'start_date': 'bad'}, {'payment_status': 'unpaid'}, {'page': '2'}):
+            self.client.get(self.url, filters)
+        for model, records in before.items():
+            self.assertEqual(list(model.objects.order_by('pk').values()), records)
+
+    def test_page_data_uses_aggregate_count_and_related_loading(self):
+        from django.test import RequestFactory
+        from .views import transactions_list
+        request = RequestFactory().get(self.url)
+        with patch('main.views.render', side_effect=lambda request, template, context: context):
+            with self.assertNumQueries(2):
+                context = transactions_list(request)
+                rows = [(sale.customer.name, sale.inventory_item.name) for sale in context['transactions']]
+        self.assertEqual(len(rows), 3)

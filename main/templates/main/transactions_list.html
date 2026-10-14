@@ -1,101 +1,74 @@
 {% extends 'main/base.html' %}
-
-{% block title %}Transactions - Water Refilling Station{% endblock %}
-
+{% load tz %}
+{% block title %}Sales Management - Water Refilling Station{% endblock %}
 {% block content %}
-<div class="container mt-4">
-    <h2 class="mb-4">Transactions</h2>
+<style>
+    .sales-management .summary-value { font-size: clamp(1.4rem, 2.5vw, 1.85rem); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .sales-management .money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .sales-management .card { border-radius: .75rem; }
+</style>
+<section class="sales-management my-4" aria-labelledby="sales-heading">
+    <header class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+        <div><p class="text-primary fw-semibold mb-1">Water Refilling Station</p><h1 id="sales-heading" class="h2 mb-1">Sales Management</h1><p class="text-muted mb-0">Search and review your sales transactions</p></div>
+        <a href="{% url 'add_transaction' %}" class="btn btn-primary">Add New Transaction</a>
+    </header>
 
-    <!-- Add Transaction Button -->
-    <a href="{% url 'add_transaction' %}" class="btn btn-primary mb-3">Add New Transaction</a>
-
-    <!-- Date Search Form -->
-    <form method="get" class="mb-4 row g-3">
-        <div class="col-md-3">
-            <label for="start_date" class="form-label">Start Date</label>
-            <input type="date" id="start_date" name="start_date"
-                   value="{{ request.GET.start_date|default:'' }}"
-                   class="form-control">
-        </div>
-        <div class="col-md-3">
-            <label for="end_date" class="form-label">End Date</label>
-            <input type="date" id="end_date" name="end_date"
-                   value="{{ request.GET.end_date|default:'' }}"
-                   class="form-control">
-        </div>
-        <div class="col-md-3 align-self-end">
-            <button type="submit" class="btn btn-success">Search</button>
-            <a href="{% url 'transactions_list' %}" class="btn btn-secondary">Reset</a>
+    <form method="get" class="card shadow-sm mb-4" aria-label="Sales filters">
+        <div class="card-body">
+            {% if filter_form.errors %}<div class="alert alert-warning" role="alert">Please correct the filters below. No transactions are shown until the filters are valid. {{ filter_form.non_field_errors }}</div>{% endif %}
+            <div class="row g-3">
+                {% for field in filter_form %}
+                <div class="{% if field.name == 'q' %}col-12 col-lg-6{% else %}col-12 col-sm-6 col-lg-3{% endif %}">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>{{ field }}
+                    {% if field.errors %}<div class="text-danger small mt-1">{{ field.errors }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3"><button type="submit" class="btn btn-primary">Apply Filters</button><a href="{% url 'transactions_list' %}" class="btn btn-outline-secondary">Clear Filters</a></div>
         </div>
     </form>
 
-    <!-- Transactions Table -->
-    <table class="table table-striped table-bordered">
-        <thead class="table-dark">
-            <tr>
-                <th>Actions</th>
-                <th>Customer</th>
-                <th>Inventory Item</th>
-                <th>Qty. (Gal)</th>
-                <th>Price/Gallon</th>
-                <th>Total Amount</th>
-                <th>Date</th>
-                <th>Payment Status</th>
-                <th>Payment Method</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for transaction in transactions %}
-                <tr>
-                    <td>
-                        <div class="btn-group" role="group">
-                            <a href="{% url 'transaction_detail' transaction.id %}" class="btn btn-sm btn-info">View</a>
-                            <a href="{% url 'edit_transaction' transaction.id %}" class="btn btn-sm btn-warning">Edit</a>
-                            <a href="{% url 'delete_transaction' transaction.id %}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?');">Delete</a>
-                        </div>
-                    </td>
-                    <td>{{ transaction.customer.name }}</td>
-                    <td>{{ transaction.inventory_item.name }}</td>
-                    <td>{{ transaction.quantity }}</td>
-                    <td>{{ transaction.price_per_gallon }}</td>
-                    <td>{{ transaction.total_amount|floatformat:2 }}</td>
-                    <td>{{ transaction.created_at|date:"M d, Y h:i A" }}</td>
-                    <td>{{ transaction.payment_status }}</td>
-                    <td>{{ transaction.payment_method }}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="9" class="text-center">No transactions found.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <!-- Pagination -->
-    <div class="pagination mt-3">
-        <span class="step-links">
-            {% if transactions.has_previous %}
-                <a href="?{% if request.GET.start_date %}start_date={{ request.GET.start_date }}&{% endif %}
-                         {% if request.GET.end_date %}end_date={{ request.GET.end_date }}&{% endif %}
-                         page=1" class="btn btn-sm btn-secondary">&laquo; First</a>
-                <a href="?{% if request.GET.start_date %}start_date={{ request.GET.start_date }}&{% endif %}
-                         {% if request.GET.end_date %}end_date={{ request.GET.end_date }}&{% endif %}
-                         page={{ transactions.previous_page_number }}" class="btn btn-sm btn-secondary">Previous</a>
-            {% endif %}
-
-            <span class="current">
-                Page {{ transactions.number }} of {{ transactions.paginator.num_pages }}
-            </span>
-
-            {% if transactions.has_next %}
-                <a href="?{% if request.GET.start_date %}start_date={{ request.GET.start_date }}&{% endif %}
-                         {% if request.GET.end_date %}end_date={{ request.GET.end_date }}&{% endif %}
-                         page={{ transactions.next_page_number }}" class="btn btn-sm btn-secondary">Next</a>
-                <a href="?{% if request.GET.start_date %}start_date={{ request.GET.start_date }}&{% endif %}
-                         {% if request.GET.end_date %}end_date={{ request.GET.end_date }}&{% endif %}
-                         page={{ transactions.paginator.num_pages }}" class="btn btn-sm btn-secondary">Last &raquo;</a>
-            {% endif %}
-        </span>
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-5 g-3 mb-3">
+        {% for label, value, monetary in summary_cards %}<div class="col"><div class="card shadow-sm h-100"><div class="card-body">
+            <h2 class="h6 text-muted">{{ label }}</h2><p class="summary-value mb-0">{% if monetary %}₱{{ value|floatformat:2 }}{% else %}{{ value }}{% endif %}</p>
+        </div></div></div>{% endfor %}
     </div>
-</div>
+    <p class="small text-muted mb-4">Totals cover all matching transactions, across every page. Paid Sales reflects current payment status, not money collected during the selected dates. Dates use the station's local timezone. Gallon totals follow the Daily Sales Report's assumption that recorded quantities represent gallons; item units are shown below.</p>
+
+    <div class="card shadow-sm"><div class="table-responsive">
+        <table class="table table-striped table-bordered align-middle mb-0">
+            <thead class="table-light"><tr>
+                <th scope="col">Date / Time</th><th scope="col">Sale ID</th><th scope="col">Customer</th><th scope="col">Product</th>
+                <th scope="col" class="text-end">Quantity</th><th scope="col" class="text-end">Price / Gallon</th><th scope="col" class="text-end">Amount</th>
+                <th scope="col">Payment Status</th><th scope="col">Payment Method</th><th scope="col">Delivery Type</th><th scope="col">Actions</th>
+            </tr></thead>
+            <tbody>{% for transaction in transactions %}<tr>
+                <td class="text-nowrap">{{ transaction.created_at|localtime|date:"M d, Y h:i A" }}</td><td>#{{ transaction.pk }}</td>
+                <td>{{ transaction.customer.name }}</td><td>{{ transaction.inventory_item.name }}</td>
+                <td class="text-end text-nowrap">{{ transaction.quantity }} {{ transaction.inventory_item.unit }}</td>
+                <td class="money text-end">₱{{ transaction.price_per_gallon|floatformat:2 }}</td><td class="money text-end fw-semibold">₱{{ transaction.total_amount|floatformat:2 }}</td>
+                <td><span class="badge {% if transaction.payment_status == 'paid' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ transaction.get_payment_status_display }}</span></td>
+                <td>{{ transaction.get_payment_method_display }}</td><td>{{ transaction.get_delivery_type_display }}</td>
+                <td><div class="d-flex gap-1">
+                    <a href="{% url 'transaction_detail' transaction.pk %}" class="btn btn-sm btn-outline-primary">View</a>
+                    <a href="{% url 'edit_transaction' transaction.pk %}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    <a href="{% url 'delete_transaction' transaction.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
+                </div></td>
+            </tr>{% empty %}<tr><td colspan="11" class="text-center text-muted py-4">No transactions found. Try different filters or clear them to view all sales.</td></tr>{% endfor %}</tbody>
+        </table>
+    </div></div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+        <p class="text-muted small mb-0">Showing {{ transactions.start_index }}–{{ transactions.end_index }} of {{ transaction_count }} transactions &middot; Page {{ transactions.number }} of {{ transactions.paginator.num_pages }}</p>
+        <nav aria-label="Sales pagination"><ul class="pagination flex-wrap mb-0">
+            {% if transactions.has_previous %}<li class="page-item"><a class="page-link" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ transactions.previous_page_number }}">Previous</a></li>{% else %}<li class="page-item disabled"><span class="page-link">Previous</span></li>{% endif %}
+            {% for page_number in page_range %}
+                {% if page_number == transactions.paginator.ELLIPSIS %}<li class="page-item disabled"><span class="page-link">{{ page_number }}</span></li>
+                {% elif page_number == transactions.number %}<li class="page-item active" aria-current="page"><span class="page-link">{{ page_number }}</span></li>
+                {% else %}<li class="page-item"><a class="page-link" aria-label="Page {{ page_number }}" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_number }}">{{ page_number }}</a></li>{% endif %}
+            {% endfor %}
+            {% if transactions.has_next %}<li class="page-item"><a class="page-link" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ transactions.next_page_number }}">Next</a></li>{% else %}<li class="page-item disabled"><span class="page-link">Next</span></li>{% endif %}
+        </ul></nav>
+    </div>
+</section>
 {% endblock %}

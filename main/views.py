@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.http import QueryDict
 from django.db import transaction as db_transaction
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import Customer
@@ -28,7 +29,7 @@ from django.core.paginator import Paginator
 
 from django.db.models import Sum, Count, Q, Exists, OuterRef
 from django.db.models.deletion import ProtectedError
-from .forms import InventoryMetadataForm
+from .forms import InventoryMetadataForm, SalesFilterForm
 from .inventory import LOW_STOCK_THRESHOLD, deletion_reason, inventory_staff_required, stock_movements, stock_status
 
 
@@ -116,27 +117,70 @@ from django.utils.dateparse import parse_date
 from .models import Transaction
 
 def transactions_list(request):
-    transactions = Transaction.objects.all().order_by('-created_at')  # Latest first
+    form = SalesFilterForm(request.GET)
+    transactions = Transaction.objects.all()
+    filter_values = {}
+    if form.is_valid():
+        filters = form.cleaned_data
+        query = filters['q']
+        if query:
+            search = Q(customer__name__icontains=query) | Q(inventory_item__name__icontains=query)
+            number = query[1:] if query.startswith('#') else query
+            if number.isascii() and number.isdecimal() and len(number) <= 19 and 0 < int(number) <= 9223372036854775807:
+                search |= Q(pk=int(number))
+            transactions = transactions.filter(search)
+        if filters['start_date']:
+            transactions = transactions.filter(created_at__date__gte=filters['start_date'])
+        if filters['end_date']:
+            transactions = transactions.filter(created_at__date__lte=filters['end_date'])
+        if filters['customer']:
+            transactions = transactions.filter(customer=filters['customer'])
+        if filters['payment_status']:
+            transactions = transactions.filter(payment_status=filters['payment_status'])
+        if filters['delivery_type']:
+            transactions = transactions.filter(delivery_type=filters['delivery_type'])
+        for name, value in filters.items():
+            if value:
+                if name in ('start_date', 'end_date'):
+                    value = value.isoformat()
+                elif name == 'customer':
+                    value = value.pk
+                filter_values[name] = str(value)
+    else:
+        # Do not silently drop invalid filters and show a wider set of sales.
+        transactions = transactions.none()
+        filter_values = {name: request.GET.get(name, '') for name in form.fields if request.GET.get(name)}
 
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
-
-    # Apply filters based on provided dates
-    if start_date and end_date:
-        transactions = transactions.filter(created_at__date__range=[start_date, end_date])
-    elif start_date:
-        transactions = transactions.filter(created_at__date__gte=start_date)
-    elif end_date:
-        transactions = transactions.filter(created_at__date__lte=end_date)
-
-    paginator = Paginator(transactions, 10)  # Show 10 per page
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-
+    zero = Decimal('0.00')
+    summary = transactions.aggregate(
+        transaction_count=Count('pk'),
+        total_qty=Sum('quantity', default=0),
+        total_revenue=Sum('total_amount', default=zero),
+        paid_sales=Sum('total_amount', filter=Q(payment_status='paid'), default=zero),
+        unpaid_sales=Sum('total_amount', filter=Q(payment_status='unpaid'), default=zero),
+    )
+    transactions = transactions.select_related('customer', 'inventory_item').order_by('-created_at', '-pk')
+    paginator = Paginator(transactions, 10)
+    # Reuse the full filtered aggregate count instead of issuing another COUNT.
+    paginator.count = summary['transaction_count']
+    page = paginator.get_page(request.GET.get('page'))
+    preserved = QueryDict(mutable=True)
+    preserved.update(filter_values)
     return render(request, 'main/transactions_list.html', {
-        'transactions': page_obj,
-        'start_date': start_date,
-        'end_date': end_date
+        **summary,
+        'filter_form': form,
+        'transactions': page,
+        'start_date': filter_values.get('start_date', ''),
+        'end_date': filter_values.get('end_date', ''),
+        'filter_query': preserved.urlencode(),
+        'page_range': paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1),
+        'summary_cards': [
+            ('Filtered Transactions', summary['transaction_count'], False),
+            ('Filtered Gallons Sold', summary['total_qty'], False),
+            ('Filtered Total Sales', summary['total_revenue'], True),
+            ('Filtered Paid Sales', summary['paid_sales'], True),
+            ('Filtered Unpaid Sales', summary['unpaid_sales'], True),
+        ],
     })
 
 
