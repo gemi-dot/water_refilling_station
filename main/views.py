@@ -1,5 +1,7 @@
 
 # Create your views here.
+from django.core.exceptions import ValidationError
+from django.db import transaction as db_transaction
 from django.shortcuts import render, redirect, get_object_or_404
 from .models import Customer
 from .forms import CustomerForm
@@ -36,7 +38,7 @@ def dashboard(request):
     total_customers = Transaction.objects.values('customer').distinct().count()
 
     # Calculate low stock items
-    low_stock_items = InventoryItem.objects.filter(stock_in__lte=10).count()
+    low_stock_items = InventoryItem.objects.annotate(remaining=F('stock_in') - F('stock_out')).filter(remaining__lte=10).count()
 
     # Recent transactions
     recent_transactions = Transaction.objects.order_by('-created_at')[:5]
@@ -135,24 +137,12 @@ def add_transaction(request):
     if request.method == 'POST':
         form = TransactionForm(request.POST)
         if form.is_valid():
-            transaction = form.save(commit=False)
-
-            # Convert quantity safely to integer
-            quantity = int(transaction.quantity)
-            inventory_item = transaction.inventory_item
-
-            # Optional: prevent overselling
-            if inventory_item.stock_out + quantity > inventory_item.stock_in:
-                form.add_error(None, "Not enough stock available in inventory.")
-                return render(request, 'main/add_transactions.html', {'form': form})
-
-            # Save transaction and update inventory
-            inventory_item.stock_out += quantity
-            inventory_item.save()
-
-            transaction.save()  # Save last
-
-            return redirect('transactions_list')  # Correct URL name
+            try:
+                form.save()
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                return redirect('transactions_list')
     else:
         form = TransactionForm()
     return render(request, 'main/add_transactions.html', {'form': form})
@@ -160,34 +150,15 @@ def add_transaction(request):
 def edit_transaction(request, pk):
     
     transaction = get_object_or_404(Transaction, pk=pk)
-    original_quantity = int(transaction.quantity)
-    original_item = transaction.inventory_item
-
     if request.method == 'POST':
         form = TransactionForm(request.POST, instance=transaction)
         if form.is_valid():
-            updated_transaction = form.save(commit=False)
-            new_quantity = int(updated_transaction.quantity)
-            new_item = updated_transaction.inventory_item
-
-            # Revert old stock_out
-            original_item.stock_out -= original_quantity
-            original_item.save()
-
-            # Optional: prevent overselling new item
-            if new_item.stock_out + new_quantity > new_item.stock_in:
-                form.add_error(None, "Not enough stock available in selected inventory.")
-                # Restore previous stock_out
-                original_item.stock_out += original_quantity
-                original_item.save()
-                return render(request, 'main/edit_transaction.html', {'form': form})  # Correct template name
-
-            # Save updated transaction and update new inventory
-            updated_transaction.save()
-            new_item.stock_out += new_quantity
-            new_item.save()
-
-            return redirect('transactions_list')
+            try:
+                form.save()
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                return redirect('transactions_list')
     else:
         form = TransactionForm(instance=transaction)
     return render(request, 'main/edit_transaction.html', {'form': form})  # Correct template name
@@ -200,12 +171,12 @@ def transaction_detail(request, pk):
 def delete_transaction(request, pk):
     transaction = get_object_or_404(Transaction, pk=pk)
     if request.method == 'POST':
-        # Rollback stock_out
-        inventory_item = transaction.inventory_item
-        inventory_item.stock_out -= int(transaction.quantity)
-        inventory_item.save()
-
-        transaction.delete()
+        try:
+            transaction.delete()
+        except ValidationError as error:
+            return render(request, 'main/delete_transaction.html', {
+                'transaction': transaction, 'error': error.messages,
+            })
         return redirect('transactions_list')
     return render(request, 'main/delete_transaction.html', {'transaction': transaction})
 
@@ -230,9 +201,9 @@ def inventory_list(request):
     inventory_items = InventoryItem.objects.all()
 
     # Check for low stock items
-    low_stock_items = InventoryItem.objects.filter(stock_in__lte=10)  # Threshold set to 10 units
+    low_stock_items = InventoryItem.objects.annotate(remaining=F('stock_in') - F('stock_out')).filter(remaining__lte=10)  # Threshold set to 10 units
     for item in low_stock_items:
-        messages.warning(request, f"Low stock alert: {item.name} has only {item.stock_in} units left.")
+        messages.warning(request, f"Low stock alert: {item.name} has only {item.current_stock()} units left.")
 
     return render(request, 'main/inventory_list.html', {'inventory_items': inventory_items})
 
@@ -250,8 +221,9 @@ def inventory_add(request):
 
 
 # Edit Inventory Item
+@db_transaction.atomic
 def inventory_edit(request, pk):
-    item = get_object_or_404(InventoryItem, pk=pk)
+    item = get_object_or_404(InventoryItem.objects.select_for_update(), pk=pk)
     if request.method == 'POST':
         form = InventoryItemForm(request.POST, instance=item)
         if form.is_valid():
@@ -320,8 +292,9 @@ def monthly_report(request):
 
 ######
 
+@db_transaction.atomic
 def restock_item(request, item_id):
-    item = get_object_or_404(InventoryItem, id=item_id)
+    item = get_object_or_404(InventoryItem.objects.select_for_update(), id=item_id)
 
     if request.method == 'POST':
         form = RestockForm(request.POST)
@@ -329,8 +302,7 @@ def restock_item(request, item_id):
             quantity = form.cleaned_data['quantity']
             note = form.cleaned_data.get('note', '')
 
-            item.stock_in += quantity
-            item.save()
+            InventoryItem.objects.filter(pk=item.pk).update(stock_in=F('stock_in') + quantity)
 
             StockLog.objects.create(
                 inventory_item=item,
