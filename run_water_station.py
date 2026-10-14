@@ -11,7 +11,7 @@ def setup_django():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     
     # Set Django settings
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'water_refilling_station.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'waterstation.settings')
     
     # Setup Django
     django.setup()

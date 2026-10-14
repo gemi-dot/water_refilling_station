@@ -50,7 +50,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'main.middleware.DemoExpirationMiddleware',  # Add this line
+    #'main.middleware.DemoExpirationMiddleware',  # Add this line
 ]
 
 ROOT_URLCONF = 'waterstation.urls'
