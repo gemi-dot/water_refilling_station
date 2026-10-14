@@ -2,6 +2,7 @@
 <h2>Confirm Delete</h2>
 <p>Are you sure you want to delete the transaction for <strong>{{ transaction.customer }}</strong> (₱{{ transaction.amount }})?</p>
 
+{% if error %}<div class="alert alert-danger" role="alert">{{ error|join:", " }}</div>{% endif %}
 <form method="post">
   {% csrf_token %}
   <button type="submit">Yes, Delete</button>

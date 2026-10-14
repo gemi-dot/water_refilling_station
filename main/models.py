@@ -1,4 +1,8 @@
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.db.models import F
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from datetime import timedelta
@@ -24,6 +28,22 @@ class InventoryItem(models.Model):
 
     def current_stock(self):
         return self.stock_in - self.stock_out
+
+    def clean(self):
+        super().clean()
+        if self.stock_in < 0 or self.stock_out < 0 or self.stock_out > self.stock_in:
+            raise ValidationError("Stock counts must be nonnegative and stock out cannot exceed stock in.")
+        if self.pk:
+            sold = self.transaction_set.aggregate(total=models.Sum('quantity'))['total'] or 0
+            if self.stock_out < sold:
+                raise ValidationError("Stock out cannot be less than the quantity in recorded sales.")
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                list(InventoryItem.objects.select_for_update().filter(pk=self.pk))
+            self.full_clean()
+            super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -57,10 +77,67 @@ class Transaction(models.Model):
     payment_method = models.CharField(max_length=10, choices=PAYMENT_METHOD_CHOICES, default='cash')
     collected_at_end_of_day = models.BooleanField(default=False)
 
+    def clean(self):
+        super().clean()
+        if self.quantity is not None and self.quantity <= 0:
+            raise ValidationError({'quantity': 'Quantity must be positive.'})
+        if self.price_per_gallon is not None and self.price_per_gallon < 0:
+            raise ValidationError({'price_per_gallon': 'Price cannot be negative.'})
+        if self.inventory_item_id and self.quantity is not None:
+            item = InventoryItem.objects.filter(pk=self.inventory_item_id).first()
+            previous = Transaction.objects.filter(pk=self.pk).first() if self.pk else None
+            credit = previous.quantity if previous and previous.inventory_item_id == self.inventory_item_id else 0
+            if item and self.quantity > item.current_stock() + credit:
+                raise ValidationError("Not enough stock available in inventory.")
+
     def save(self, *args, **kwargs):
-        # Automatically calculate total_amount before saving
-        self.total_amount = self.quantity * self.price_per_gallon
-        super(Transaction, self).save(*args, **kwargs)
+        with transaction.atomic():
+            previous = None
+            if not self._state.adding:
+                previous = Transaction.objects.select_for_update().get(pk=self.pk)
+            # Respect partial saves: omitted sale fields retain their stored values.
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None:
+                if not update_fields:
+                    return
+                if previous:
+                    for field in ('quantity', 'inventory_item', 'price_per_gallon'):
+                        if field not in update_fields and f'{field}_id' not in update_fields:
+                            setattr(self, field, getattr(previous, field))
+                kwargs['update_fields'] = set(update_fields) | {'total_amount'}
+            if self.quantity <= 0 or self.price_per_gallon < 0:
+                raise ValidationError("Quantity must be positive and price cannot be negative.")
+            item_ids = {self.inventory_item_id}
+            if previous:
+                item_ids.add(previous.inventory_item_id)
+            # Consistent lock ordering avoids deadlocks when swapping items.
+            list(InventoryItem.objects.select_for_update().filter(pk__in=item_ids).order_by('pk'))
+            if previous:
+                adjust_stock_out(previous.inventory_item_id, -previous.quantity)
+            adjust_stock_out(self.inventory_item_id, self.quantity)
+            self.total_amount = self.quantity * self.price_per_gallon
+            super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            stored = Transaction.objects.select_for_update().get(pk=self.pk)
+            return super(Transaction, stored).delete(*args, **kwargs)
+
+
+def adjust_stock_out(item_id, change):
+    """Conditional database updates protect balances even without row locks (SQLite)."""
+    updated = InventoryItem.objects.filter(
+        pk=item_id, stock_out__gte=max(0, -change),
+        stock_in__gte=F('stock_out') + change,
+    ).update(stock_out=F('stock_out') + change)
+    if not updated:
+        raise ValidationError("Not enough stock available, or inventory counts are inconsistent.")
+
+
+@receiver(pre_delete, sender=Transaction)
+def restore_deleted_sale_stock(sender, instance, **kwargs):
+    # Also covers admin bulk deletion and customer cascade deletion.
+    adjust_stock_out(instance.inventory_item_id, -instance.quantity)
 
         
 class StockLog(models.Model):

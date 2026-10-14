@@ -17,6 +17,9 @@ class CustomerForm(forms.ModelForm):
 
 
 class TransactionForm(forms.ModelForm):
+    quantity = forms.IntegerField(min_value=1)
+    price_per_gallon = forms.DecimalField(min_value=0, max_digits=10, decimal_places=2)
+
     class Meta:
         model = Transaction
         fields = [
