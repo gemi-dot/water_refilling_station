@@ -30,27 +30,30 @@ from django.db.models import Sum, Count, Q
 
 
 def dashboard(request):
-    # Calculate total revenue
-    total_revenue = Transaction.objects.aggregate(total=Sum('total_amount'))['total'] or 0
-
-    # Calculate total transactions
-    total_transactions = Transaction.objects.count()
-
-    # Calculate total customers
-    total_customers = Transaction.objects.values('customer').distinct().count()
-
-    # Calculate low stock items
-    low_stock_items = InventoryItem.objects.annotate(remaining=F('stock_in') - F('stock_out')).filter(remaining__lte=10).count()
-
-    # Recent transactions
-    recent_transactions = Transaction.objects.order_by('-created_at')[:5]
-
+    today = timezone.localdate()
+    dated_today = Q(created_at__date=today)
+    zero = Decimal('0.00')
+    # Match Daily Report V2: date sales locally and use current payment status.
+    summary = Transaction.objects.aggregate(
+        total_revenue=Sum('total_amount', default=zero),
+        total_transactions=Count('pk'),
+        today_sales=Sum('total_amount', filter=dated_today, default=zero),
+        today_gallons=Sum('quantity', filter=dated_today, default=0),
+        today_paid=Sum('total_amount', filter=dated_today & Q(payment_status='paid'), default=zero),
+        today_unpaid=Sum('total_amount', filter=dated_today & Q(payment_status='unpaid'), default=zero),
+        today_transactions=Count('pk', filter=dated_today),
+    )
+    inventory_items = list(InventoryItem.objects.order_by('name', 'pk'))
+    # Display-only threshold matches the existing inventory list's 10-unit alert.
+    low_stock_threshold = 10
     context = {
-        'total_revenue': total_revenue,
-        'total_transactions': total_transactions,
-        'total_customers': total_customers,
-        'low_stock_items': low_stock_items,
-        'recent_transactions': recent_transactions,
+        **summary,
+        'today': today,
+        'total_customers': Customer.objects.count(),
+        'inventory_items': inventory_items,
+        'low_stock_threshold': low_stock_threshold,
+        'low_stock_items': sum(item.current_stock() <= low_stock_threshold for item in inventory_items),
+        'recent_transactions': Transaction.objects.select_related('customer', 'inventory_item').order_by('-created_at', '-pk')[:10],
     }
     return render(request, 'main/dashboard.html', context)
 

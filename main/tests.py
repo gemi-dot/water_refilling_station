@@ -745,3 +745,145 @@ class DemoAdministrativeCommandTests(SimpleTestCase):
             cursor.execute("ATTACH DATABASE ':memory:' AS foreign_data")
         with self.assertRaises(CommandError):
             require_demo_database()
+
+
+class DashboardV3Tests(TestCase):
+    def setUp(self):
+        from datetime import date
+        from django.contrib.auth import get_user_model
+        self.today = date(2026, 10, 14)
+        self.user = get_user_model().objects.create_user(username='dashboard-reviewer', password='test-only-password')
+        self.customer = Customer.objects.create(name='Dashboard Customer', address='Fictional address', contact_number='N/A')
+        self.non_buyer = Customer.objects.create(name='Customer Without Sales', address='Fictional address', contact_number='N/A')
+        self.item = InventoryItem.objects.create(name='Purified Refill', unit='gallons', stock_in=100)
+        self.paid_sale = self.sale(2, '25.50', 'paid', hour=9)
+        self.unpaid_sale = self.sale(3, '30.25', 'unpaid', hour=10)
+        self.yesterday_sale = self.sale(4, '40.00', 'paid', day_offset=-1)
+        self.url = reverse('dashboard')
+        self.client.force_login(self.user)
+
+    def sale(self, quantity, price, status, day_offset=0, hour=12):
+        from datetime import datetime, time, timedelta
+        from zoneinfo import ZoneInfo
+        sale = Transaction.objects.create(
+            customer=self.customer, inventory_item=self.item, quantity=quantity,
+            price_per_gallon=Decimal(price), payment_status=status,
+            delivery_type='delivery' if status == 'unpaid' else 'walk-in',
+        )
+        timestamp = datetime.combine(self.today + timedelta(days=day_offset), time(hour), ZoneInfo('Asia/Manila'))
+        Transaction.objects.filter(pk=sale.pk).update(created_at=timestamp)
+        return sale
+
+    def dashboard(self):
+        with patch('main.views.timezone.localdate', return_value=self.today):
+            return self.client.get(self.url)
+
+    def test_authorized_user_sees_dashboard_and_existing_action_links(self):
+        response = self.dashboard()
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'main/dashboard.html')
+        self.assertTemplateUsed(response, 'main/base.html')
+        for text in ("Today's Total Sales", 'Gallons Sold Today', 'Paid Sales Today', 'Unpaid Sales Today', 'Total Customers', 'Inventory Overview', 'Recent Transactions', 'Quick Actions', 'October 14, 2026', 'table-responsive'):
+            with self.subTest(text=text):
+                self.assertContains(response, text)
+        for route in ('add_transaction', 'customer_list', 'inventory_list', 'daily_report'):
+            self.assertContains(response, reverse(route))
+
+    def test_today_sales_paid_unpaid_and_gallons_match_daily_report(self):
+        response = self.dashboard()
+        context = response.context
+        self.assertEqual(context['today_sales'], Decimal('141.75'))
+        self.assertEqual(context['today_paid'], Decimal('51.00'))
+        self.assertEqual(context['today_unpaid'], Decimal('90.75'))
+        self.assertEqual(context['today_gallons'], 5)
+        self.assertEqual(context['today_transactions'], 2)
+        self.assertEqual(context['today_paid'] + context['today_unpaid'], context['today_sales'])
+        report = self.client.get(reverse('daily_report'), {'date': self.today.isoformat()})
+        for dashboard_key, report_key in (('today_sales', 'total_revenue'), ('today_paid', 'paid_sales'), ('today_unpaid', 'unpaid_sales'), ('today_gallons', 'total_qty')):
+            self.assertEqual(context[dashboard_key], report.context[report_key])
+        self.assertContains(response, '₱141.75')
+        self.assertContains(response, 'not cash collected today')
+
+    def test_customer_count_includes_registered_customers_without_sales(self):
+        self.assertEqual(self.dashboard().context['total_customers'], 2)
+
+    def test_inventory_remaining_stock_and_status_boundaries(self):
+        InventoryItem.objects.create(name='Empty', unit='gallons', stock_in=5, stock_out=5)
+        InventoryItem.objects.create(name='Low', unit='gallons', stock_in=20, stock_out=10)
+        InventoryItem.objects.create(name='Healthy', unit='pcs', stock_in=11)
+        response = self.dashboard()
+        self.assertEqual(response.context['low_stock_threshold'], 10)
+        self.assertEqual(response.context['low_stock_items'], 2)
+        for text in ('91 gallons', '0 gallons', '10 gallons', '11 pcs', 'Out of Stock', 'Low Stock', 'In Stock', '10 units or fewer'):
+            with self.subTest(text=text):
+                self.assertContains(response, text)
+
+    def test_recent_transactions_are_newest_first_with_deterministic_ties_and_limit(self):
+        for index in range(12):
+            self.sale(1, '1.00', 'paid', hour=15)
+        response = self.dashboard()
+        rows = list(response.context['recent_transactions'])
+        expected = list(Transaction.objects.order_by('-created_at', '-pk').values_list('pk', flat=True)[:10])
+        self.assertEqual([sale.pk for sale in rows], expected)
+        self.assertEqual(len(rows), 10)
+
+    def test_recent_transactions_include_previous_days(self):
+        rows = list(self.dashboard().context['recent_transactions'])
+        self.assertEqual([sale.pk for sale in rows], [self.unpaid_sale.pk, self.paid_sale.pk, self.yesterday_sale.pk])
+
+    def test_local_calendar_day_includes_exact_midnight_boundaries(self):
+        from datetime import datetime, timezone as dt_timezone
+        Transaction.objects.filter(pk=self.paid_sale.pk).update(created_at=datetime(2026, 10, 13, 16, 0, tzinfo=dt_timezone.utc))
+        Transaction.objects.filter(pk=self.unpaid_sale.pk).update(created_at=datetime(2026, 10, 14, 15, 59, 59, tzinfo=dt_timezone.utc))
+        Transaction.objects.filter(pk=self.yesterday_sale.pk).update(created_at=datetime(2026, 10, 14, 16, 0, tzinfo=dt_timezone.utc))
+        self.assertEqual(self.dashboard().context['today_sales'], Decimal('141.75'))
+
+    def test_paid_status_counts_independently_of_collection_flag(self):
+        Transaction.objects.filter(pk=self.paid_sale.pk).update(collected_at_end_of_day=True)
+        self.assertEqual(self.dashboard().context['today_paid'], Decimal('51.00'))
+        self.unpaid_sale.payment_status = 'paid'
+        self.unpaid_sale.save(update_fields=['payment_status'])
+        context = self.dashboard().context
+        self.assertEqual(context['today_paid'], Decimal('141.75'))
+        self.assertEqual(context['today_unpaid'], Decimal('0.00'))
+
+    def test_empty_dashboard_renders_zero_totals_and_empty_states(self):
+        Transaction.objects.all().delete()
+        Customer.objects.all().delete()
+        InventoryItem.objects.all().delete()
+        response = self.dashboard()
+        self.assertEqual(response.status_code, 200)
+        for key in ('today_sales', 'today_paid', 'today_unpaid', 'today_gallons', 'today_transactions', 'total_customers', 'low_stock_items'):
+            with self.subTest(key=key):
+                self.assertEqual(response.context[key], 0)
+        self.assertIsInstance(response.context['today_sales'], Decimal)
+        self.assertContains(response, 'No inventory items yet.')
+        self.assertContains(response, 'No recent transactions found.')
+        self.assertContains(response, '₱0.00')
+
+    def test_existing_public_dashboard_and_protected_admin_access_are_preserved(self):
+        # The existing dashboard has no login decorator. Preserve that policy.
+        self.client.logout()
+        self.assertEqual(self.dashboard().status_code, 200)
+        self.assertEqual(self.client.get(reverse('admin:index')).status_code, 302)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse('admin:index')).status_code, 302)
+
+    def test_dashboard_is_read_only(self):
+        before_sales = list(Transaction.objects.order_by('pk').values())
+        before_stock = list(InventoryItem.objects.order_by('pk').values())
+        before_customers = list(Customer.objects.order_by('pk').values())
+        self.dashboard()
+        self.assertEqual(list(Transaction.objects.order_by('pk').values()), before_sales)
+        self.assertEqual(list(InventoryItem.objects.order_by('pk').values()), before_stock)
+        self.assertEqual(list(Customer.objects.order_by('pk').values()), before_customers)
+
+    def test_dashboard_data_has_no_per_transaction_related_queries(self):
+        from django.test import RequestFactory
+        from .views import dashboard
+        request = RequestFactory().get(self.url)
+        with patch('main.views.timezone.localdate', return_value=self.today), patch('main.views.render', side_effect=lambda request, template, context: context):
+            with self.assertNumQueries(4):
+                context = dashboard(request)
+                rows = [(sale.customer.name, sale.inventory_item.name) for sale in context['recent_transactions']]
+        self.assertEqual(len(rows), 3)
